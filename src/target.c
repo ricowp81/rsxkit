@@ -13,7 +13,9 @@
 #include "internal.h"
 
 #define TARGET_MAX 8
-#define SURF_ALIGN 64
+/* 128: la presentación lee el destino como textura desde una fila
+ * cualquiera, y el offset de una textura va alineado a 128. */
+#define SURF_ALIGN 128
 
 struct rsxkit_target {
 	int used;
@@ -265,12 +267,9 @@ void rsxkit_target_present(rsxkit_target *t, const rsxkit_rect *src, uint32_t im
 	rsxkit_rect r = rsxkit_layout(img_w ? img_w : s.w, img_h ? img_h : s.h, view);
 	if (out)
 		*out = r;
-	/* La textura empieza en la esquina de la región. */
-	uint32_t offset = t->offset + (uint32_t)s.y * t->pitch + (uint32_t)s.x * 4;
-	if (offset & 127) {
-		offset = t->offset;
-		s.x = s.y = 0;
-	}
+	/* La textura empieza en la esquina de la región (offset alineado a
+	 * 128: el destino y su pitch lo están; la x se redondea hacia abajo). */
+	uint32_t offset = t->offset + (uint32_t)s.y * t->pitch + (((uint32_t)s.x * 4) & ~127u);
 	/* Que el RSX termine de escribir el destino antes de leerlo. */
 	rsxSetWaitForIdle(rsxkit_g.ctx);
 	rsxInvalidateTextureCache(rsxkit_g.ctx, GCM_INVALIDATE_TEXTURE);
