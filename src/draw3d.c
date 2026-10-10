@@ -72,14 +72,9 @@ static int init_3d(void)
 	}
 	const u8 *fps[3] = { rsxkit_lincomb0_fpo, rsxkit_lincomb1_fpo, rsxkit_lincomb2_fpo };
 	for (int i = 0; i < 3; i++) {
-		void *ucode;
 		d3.fp[i] = (rsxFragmentProgram *)fps[i];
-		rsxFragmentProgramGetUCode(d3.fp[i], &ucode, &size);
-		void *buf = rsxMemalign(64, size);
-		if (!buf)
+		if (!rsxkit_fp_upload(d3.fp[i], &d3.fp_offset[i]))
 			return RSXKIT_ENOMEM;
-		memcpy(buf, ucode, size);
-		rsxAddressToOffset(buf, &d3.fp_offset[i]);
 	}
 	d3.ready = 1;
 	return RSXKIT_OK;
@@ -141,9 +136,9 @@ static void fixed_state(void)
 	rsxSetZMinMaxControl(ctx, GCM_FALSE, GCM_TRUE, GCM_FALSE);
 	rsxSetDepthFunc(ctx, GCM_LEQUAL);
 	rsxSetBlendEquation(ctx, GCM_FUNC_ADD, GCM_FUNC_ADD);
-	/* La y lógica crece hacia abajo y el viewport la invierte: lo que es
-	 * antihorario con la y hacia arriba llega horario al RSX. */
-	rsxSetFrontFace(ctx, GCM_FRONTFACE_CW);
+	/* Frente: antihorario con la y hacia arriba (en el espacio de recorte,
+	 * antes del viewport). Verificado en RPCS3 y en la PS3 con gfxtest. */
+	rsxSetFrontFace(ctx, GCM_FRONTFACE_CCW);
 	rsxSetPolygonOffset(ctx, -1.0f, -2.0f);
 	/* Forzar que el primer dibujo ponga todo. */
 	d3.blend = d3.cull = d3.depth = d3.alpha_ref = 0xFF;

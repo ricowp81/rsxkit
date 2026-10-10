@@ -66,6 +66,9 @@ void rsxkit_fb_shutdown(void);
 void rsxkit_leave_3d(void);
 void rsxkit_3d_shutdown(void);
 void rsxkit_target_shutdown(void);
+/* Copia un fragment program a la memoria del RSX, con interpolación de
+ * perspectiva en todas sus entradas (fprog.c). NULL si no hay memoria. */
+void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset);
 /* Dibuja una textura lineal X8R8G8B8 de la memoria local como un
  * rectángulo en la pantalla (fb.c). */
 void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u1, float v1,

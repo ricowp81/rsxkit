@@ -75,22 +75,16 @@ static struct {
 
 static int init_programs(void)
 {
-	u32 vp_size, fp_size;
-	void *fp_ucode;
+	u32 vp_size;
 
 	if (prog.ready)
 		return RSXKIT_OK;
 	prog.vp = (rsxVertexProgram *)rsxkit_blit_vpo;
 	prog.fp = (rsxFragmentProgram *)rsxkit_blit_fpo;
 	rsxVertexProgramGetUCode(prog.vp, &prog.vp_ucode, &vp_size);
-	rsxFragmentProgramGetUCode(prog.fp, &fp_ucode, &fp_size);
-
 	/* El RSX lee el fragment program desde su memoria. */
-	void *fp_buf = rsxMemalign(64, fp_size);
-	if (!fp_buf)
+	if (!rsxkit_fp_upload(prog.fp, &prog.fp_offset))
 		return RSXKIT_ENOMEM;
-	memcpy(fp_buf, fp_ucode, fp_size);
-	rsxAddressToOffset(fp_buf, &prog.fp_offset);
 	rsxProgramAttrib *tex = rsxFragmentProgramGetAttrib(prog.fp, "texture");
 	prog.tex_unit = tex ? tex->index : 0;
 	prog.ready = 1;
