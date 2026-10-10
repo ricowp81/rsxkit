@@ -135,7 +135,9 @@ rsxkit_rect rsxkit_layout(uint32_t width, uint32_t height, const rsxkit_view *vi
 int rsxkit_map_main(void *ptr, uint32_t size, uint32_t *offset);
 
 /* Barrera: marca lo enviado hasta ahora; rsxkit_fence_done dice si el RSX
- * ya lo terminó y rsxkit_fence_wait lo espera. */
+ * ya lo terminó y rsxkit_fence_wait lo espera. rsxkit_fence_done solo lee
+ * la etiqueta que escribe el RSX: es la única función que se puede llamar
+ * desde otro hilo (un productor que espera a que el RSX suelte su búfer). */
 uint32_t rsxkit_fence(void);
 int rsxkit_fence_done(uint32_t fence);
 void rsxkit_fence_wait(uint32_t fence);

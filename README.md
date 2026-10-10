@@ -115,7 +115,7 @@ Vista (`rsxkit_view`):
 |---|---|
 | `int rsxkit_map_main(void *p, uint32_t size, uint32_t *offset)` | Hace visible para el RSX memoria principal (alineada a 1 MB, tamaño múltiplo de 1 MB) y da su offset. Ahí pueden vivir vértices y texturas que escribe la CPU o un SPE, sin copias. |
 | `uint32_t rsxkit_fence(void)` | Marca lo enviado hasta ahora. |
-| `int rsxkit_fence_done(uint32_t f)` / `void rsxkit_fence_wait(uint32_t f)` | ¿Ya lo terminó el RSX? / esperarlo. Sirve para reutilizar un búfer que el RSX estaba leyendo. |
+| `int rsxkit_fence_done(uint32_t f)` / `void rsxkit_fence_wait(uint32_t f)` | ¿Ya lo terminó el RSX? / esperarlo. Sirve para reutilizar un búfer que el RSX estaba leyendo. `rsxkit_fence_done` solo lee la etiqueta que escribe el RSX y es la única función que puede llamarse desde otro hilo (el que produce los búferes). |
 
 ### Destinos de render
 
