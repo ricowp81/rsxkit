@@ -1,0 +1,362 @@
+/* SPDX-License-Identifier: MIT */
+/*
+ * rsxkit — dibujo 3D: triángulos de un arreglo de rsxkit_vertex en el
+ * destino ligado, con la combinación lineal de dos texturas y el color del
+ * vértice (shaders/rsxkit_lincomb*.{vcg,fcg}).
+ *
+ * El vertex program lleva las coordenadas lógicas al espacio de recorte y
+ * arma los cinco términos X_i con constantes por dibujo; hay tres fragment
+ * programs (sin textura, una, dos) que solo suman. Todo el estado se
+ * recuerda y solo se reenvía lo que cambia: un núcleo puede mandar cientos
+ * de dibujos por cuadro sin llenar el búfer de comandos de estado repetido.
+ *
+ * Profundidad: z/w en [0, 1] con LEQUAL; sin recorte por los planos
+ * cercano y lejano (la z se satura), como hacen los microcódigos de N64
+ * sin recorte cercano. El recorte por w > 0 lo sigue haciendo el RSX.
+ */
+#include <string.h>
+
+#include "internal.h"
+
+extern const u8 rsxkit_lincomb_vpo[];
+extern const u8 rsxkit_lincomb0_fpo[];
+extern const u8 rsxkit_lincomb1_fpo[];
+extern const u8 rsxkit_lincomb2_fpo[];
+
+#define NCONST 19  /* space, xf[2], k[15], fog */
+
+struct tex_state {
+	int valid;
+	rsxkit_texture t;
+};
+
+static struct {
+	int ready;
+	rsxVertexProgram *vp;
+	void *vp_ucode;
+	rsxFragmentProgram *fp[3];
+	u32 fp_offset[3];
+	u32 const_start;
+	rsxProgramConst *consts[NCONST];
+	int block;  /* constantes consecutivas: se suben de una vez */
+	float c[NCONST][4];
+	int c_valid;
+	/* Estado puesto. */
+	uint8_t blend, cull, depth, alpha_ref;
+	struct tex_state tex[2];
+	uint32_t vb_offset;
+	uint8_t vb_location;
+	int vb_set;
+} d3;
+
+static const char *const const_names[NCONST] = {
+	"space", "xf[0]", "xf[1]", "k[0]", "k[1]", "k[2]", "k[3]", "k[4]", "k[5]", "k[6]", "k[7]",
+	"k[8]", "k[9]", "k[10]", "k[11]", "k[12]", "k[13]", "k[14]", "fog",
+};
+
+static int init_3d(void)
+{
+	if (d3.ready)
+		return RSXKIT_OK;
+	u32 size;
+	d3.vp = (rsxVertexProgram *)rsxkit_lincomb_vpo;
+	rsxVertexProgramGetUCode(d3.vp, &d3.vp_ucode, &size);
+	d3.const_start = d3.vp->const_start;
+	d3.block = 1;
+	for (int i = 0; i < NCONST; i++) {
+		d3.consts[i] = rsxVertexProgramGetConst(d3.vp, const_names[i]);
+		if (!d3.consts[i])
+			return RSXKIT_EINIT;
+		if (d3.consts[i]->index != d3.consts[0]->index + (u32)i)
+			d3.block = 0;
+	}
+	const u8 *fps[3] = { rsxkit_lincomb0_fpo, rsxkit_lincomb1_fpo, rsxkit_lincomb2_fpo };
+	for (int i = 0; i < 3; i++) {
+		void *ucode;
+		d3.fp[i] = (rsxFragmentProgram *)fps[i];
+		rsxFragmentProgramGetUCode(d3.fp[i], &ucode, &size);
+		void *buf = rsxMemalign(64, size);
+		if (!buf)
+			return RSXKIT_ENOMEM;
+		memcpy(buf, ucode, size);
+		rsxAddressToOffset(buf, &d3.fp_offset[i]);
+	}
+	d3.ready = 1;
+	return RSXKIT_OK;
+}
+
+void rsxkit_3d_shutdown(void)
+{
+	memset(&d3, 0, sizeof d3);
+}
+
+void rsxkit_leave_3d(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	if (g->arrays_bound) {
+		rsxkit_reserve(80);
+		for (int i = 0; i < 16; i++)
+			rsxBindVertexArrayAttrib(g->ctx, i, 0, 0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+		g->arrays_bound = 0;
+	}
+	g->prog_3d = 0;
+	g->fp_3d = -1;
+	g->state_valid = 0;
+	d3.c_valid = 0;
+}
+
+void rsxkit_vertices(uint32_t offset, uint8_t location)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	d3.vb_offset = offset;
+	d3.vb_location = location;
+	d3.vb_set = 1;
+	g->arrays_bound = 0;  /* se vuelven a ligar en el próximo dibujo */
+	rsxkit_reserve(32);
+	/* Lo que hay en memoria cambió: vértices y texturas nuevas. */
+	rsxInvalidateVertexCache(g->ctx);
+	rsxInvalidateTextureCache(g->ctx, GCM_INVALIDATE_TEXTURE);
+	d3.tex[0].valid = d3.tex[1].valid = 0;
+}
+
+static void bind_arrays(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	u8 loc = d3.vb_location == RSXKIT_MEM_MAIN ? GCM_LOCATION_CELL : GCM_LOCATION_RSX;
+	u32 o = d3.vb_offset;
+	const u8 stride = sizeof(rsxkit_vertex);
+	rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_POS, 0, o + 0, stride, 4, GCM_VERTEX_DATA_TYPE_F32, loc);
+	rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_TEX0, 0, o + 16, stride, 2, GCM_VERTEX_DATA_TYPE_F32, loc);
+	rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_COLOR0, 0, o + 24, stride, 4, GCM_VERTEX_DATA_TYPE_U8, loc);
+	g->arrays_bound = 1;
+}
+
+/* Estado fijo del 3D: se pone una vez por destino ligado. */
+static void fixed_state(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	gcmContextData *ctx = g->ctx;
+	rsxSetColorMaskMrt(ctx, 0);
+	rsxSetShadeModel(ctx, GCM_SHADE_MODEL_SMOOTH);
+	rsxSetZMinMaxControl(ctx, GCM_FALSE, GCM_TRUE, GCM_FALSE);
+	rsxSetDepthFunc(ctx, GCM_LEQUAL);
+	rsxSetBlendEquation(ctx, GCM_FUNC_ADD, GCM_FUNC_ADD);
+	/* La y lógica crece hacia abajo y el viewport la invierte: lo que es
+	 * antihorario con la y hacia arriba llega horario al RSX. */
+	rsxSetFrontFace(ctx, GCM_FRONTFACE_CW);
+	rsxSetPolygonOffset(ctx, -1.0f, -2.0f);
+	/* Forzar que el primer dibujo ponga todo. */
+	d3.blend = d3.cull = d3.depth = d3.alpha_ref = 0xFF;
+	d3.tex[0].valid = d3.tex[1].valid = 0;
+	rsxkit_bound.scissor_valid = 0;
+	g->state_valid = 1;
+}
+
+static void set_blend(uint8_t blend)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	if (blend == d3.blend)
+		return;
+	d3.blend = blend;
+	u32 mask = GCM_COLOR_MASK_B | GCM_COLOR_MASK_G | GCM_COLOR_MASK_R | GCM_COLOR_MASK_A;
+	switch (blend) {
+	case RSXKIT_BLEND_ALPHA:
+		rsxSetBlendEnable(ctx, GCM_TRUE);
+		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA, GCM_ZERO, GCM_ONE);
+		break;
+	case RSXKIT_BLEND_ADD:
+		rsxSetBlendEnable(ctx, GCM_TRUE);
+		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE, GCM_ZERO, GCM_ONE);
+		break;
+	case RSXKIT_BLEND_NONE:
+		rsxSetBlendEnable(ctx, GCM_FALSE);
+		mask = 0;
+		break;
+	default:
+		rsxSetBlendEnable(ctx, GCM_FALSE);
+		break;
+	}
+	rsxSetColorMask(ctx, mask);
+}
+
+static void set_depth(uint8_t depth)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	if (!rsxkit_bound.depth)
+		depth = 0;
+	if (depth == d3.depth)
+		return;
+	d3.depth = depth;
+	rsxSetDepthTestEnable(ctx, (depth & RSXKIT_DEPTH_TEST) ? GCM_TRUE : GCM_FALSE);
+	rsxSetDepthWriteEnable(ctx, (depth & RSXKIT_DEPTH_WRITE) ? GCM_TRUE : GCM_FALSE);
+	rsxSetPolygonOffsetFillEnable(ctx, (depth & RSXKIT_DEPTH_OFFSET) ? GCM_TRUE : GCM_FALSE);
+}
+
+static void set_cull(uint8_t cull)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	if (cull == d3.cull)
+		return;
+	d3.cull = cull;
+	if (cull == RSXKIT_CULL_NONE) {
+		rsxSetCullFaceEnable(ctx, GCM_FALSE);
+		return;
+	}
+	rsxSetCullFaceEnable(ctx, GCM_TRUE);
+	rsxSetCullFace(ctx, cull == RSXKIT_CULL_FRONT ? GCM_CULL_FRONT : GCM_CULL_BACK);
+}
+
+static void set_alpha(uint8_t ref)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	if (ref == d3.alpha_ref)
+		return;
+	d3.alpha_ref = ref;
+	rsxSetAlphaTestEnable(ctx, ref ? GCM_TRUE : GCM_FALSE);
+	if (ref)
+		rsxSetAlphaFunc(ctx, GCM_GEQUAL, ref);
+}
+
+static void set_scissor(const float s[4])
+{
+	uint32_t r[4];
+	rsxkit_logical_rect(s, r);
+	uint32_t w = r[2] > r[0] ? r[2] - r[0] : 0, h = r[3] > r[1] ? r[3] - r[1] : 0;
+	uint32_t v[4] = { r[0], r[1], w, h };
+	if (rsxkit_bound.scissor_valid && !memcmp(v, rsxkit_bound.scissor, sizeof v))
+		return;
+	memcpy(rsxkit_bound.scissor, v, sizeof v);
+	rsxkit_bound.scissor_valid = 1;
+	rsxSetScissor(rsxkit_g.ctx, r[0], r[1], w, h);
+}
+
+/* Formatos de textura que lee el 3D (los mismos del framebuffer 2D). */
+static void texture_format(uint8_t fmt, u8 *gcm, u32 *remap)
+{
+#define REMAP(a, r, g, b)                                                                    \
+	GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY, a, r, g, b,                      \
+			       GCM_TEXTURE_REMAP_TYPE_REMAP, GCM_TEXTURE_REMAP_TYPE_REMAP,     \
+			       GCM_TEXTURE_REMAP_TYPE_REMAP, GCM_TEXTURE_REMAP_TYPE_REMAP)
+	switch (fmt) {
+	case RSXKIT_RGBA5551:
+		*gcm = GCM_TEXTURE_FORMAT_R5G6B5A1;
+		*remap = REMAP(GCM_TEXTURE_REMAP_COLOR_A, GCM_TEXTURE_REMAP_COLOR_R, GCM_TEXTURE_REMAP_COLOR_G,
+			       GCM_TEXTURE_REMAP_COLOR_B);
+		break;
+	case RSXKIT_XRGB8888:
+		*gcm = GCM_TEXTURE_FORMAT_A8R8G8B8;
+		*remap = REMAP(GCM_TEXTURE_REMAP_COLOR_A, GCM_TEXTURE_REMAP_COLOR_R, GCM_TEXTURE_REMAP_COLOR_G,
+			       GCM_TEXTURE_REMAP_COLOR_B);
+		break;
+	default:  /* RGBA8888: bytes R, G, B, A leídos como A, R, G, B */
+		*gcm = GCM_TEXTURE_FORMAT_A8R8G8B8;
+		*remap = REMAP(GCM_TEXTURE_REMAP_COLOR_B, GCM_TEXTURE_REMAP_COLOR_A, GCM_TEXTURE_REMAP_COLOR_R,
+			       GCM_TEXTURE_REMAP_COLOR_G);
+		break;
+	}
+#undef REMAP
+}
+
+static u8 wrap_mode(uint8_t w)
+{
+	return w == RSXKIT_WRAP_REPEAT ? GCM_TEXTURE_REPEAT
+	       : w == RSXKIT_WRAP_MIRROR ? GCM_TEXTURE_MIRRORED_REPEAT
+					 : GCM_TEXTURE_CLAMP_TO_EDGE;
+}
+
+static void set_texture(int unit, const rsxkit_texture *t)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	struct tex_state *s = &d3.tex[unit];
+	/* xf va en las constantes, no en la unidad de textura. */
+	if (s->valid && !memcmp(&s->t, t, offsetof(rsxkit_texture, xf)))
+		return;
+	s->valid = 1;
+	s->t = *t;
+
+	gcmTexture tex;
+	memset(&tex, 0, sizeof tex);
+	u8 gcm;
+	u32 remap;
+	texture_format(t->format, &gcm, &remap);
+	tex.format = gcm | GCM_TEXTURE_FORMAT_LIN | GCM_TEXTURE_FORMAT_NRM;
+	tex.mipmap = 1;
+	tex.dimension = GCM_TEXTURE_DIMS_2D;
+	tex.cubemap = GCM_FALSE;
+	tex.remap = remap;
+	tex.width = t->width;
+	tex.height = t->height;
+	tex.depth = 1;
+	tex.location = t->location == RSXKIT_MEM_MAIN ? GCM_LOCATION_CELL : GCM_LOCATION_RSX;
+	tex.pitch = t->pitch;
+	tex.offset = t->offset;
+	rsxLoadTexture(ctx, (u8)unit, &tex);
+	rsxTextureControl(ctx, (u8)unit, GCM_TRUE, 0 << 8, 12 << 8, GCM_TEXTURE_MAX_ANISO_1);
+	u8 filt = t->filter == RSXKIT_FILTER_NEAREST ? GCM_TEXTURE_NEAREST : GCM_TEXTURE_LINEAR;
+	rsxTextureFilter(ctx, (u8)unit, 0, filt, filt, GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+	rsxTextureWrapMode(ctx, (u8)unit, wrap_mode(t->wrap_s), wrap_mode(t->wrap_t), GCM_TEXTURE_CLAMP_TO_EDGE, 0,
+			   GCM_TEXTURE_ZFUNC_LESS, 0);
+}
+
+static void set_constants(const rsxkit_draw *d)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	float c[NCONST][4];
+	memset(c, 0, sizeof c);
+	c[0][0] = 2.0f / rsxkit_bound.lw;
+	c[0][1] = 2.0f / rsxkit_bound.lh;
+	for (int i = 0; i < 2; i++)
+		if (i < d->ntex)
+			memcpy(c[1 + i], d->tex[i].xf, sizeof c[1 + i]);
+	memcpy(c[3], d->k, sizeof d->k);
+	if (d->fog) {
+		memcpy(c[18], d->fog_color, sizeof c[18]);
+		c[18][3] = 1.0f;
+	}
+	if (d3.c_valid && !memcmp(c, d3.c, sizeof c))
+		return;
+	memcpy(d3.c, c, sizeof c);
+	d3.c_valid = 1;
+	if (d3.block) {
+		/* No rsxSetVertexProgramConstants: en PSL1GHT f649a08 avanza el
+		 * búfer de comandos dos veces (docs/rsx-notes.md). */
+		rsxLoadVertexProgramParameterBlock(ctx, d3.const_start + d3.consts[0]->index, NCONST, &c[0][0]);
+	} else {
+		for (int i = 0; i < NCONST; i++)
+			rsxSetVertexProgramParameter(ctx, d3.vp, d3.consts[i], c[i]);
+	}
+}
+
+void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	gcmContextData *ctx = g->ctx;
+	if (!count || !d3.vb_set || !rsxkit_bound.target || g->screen_bound || init_3d() != RSXKIT_OK)
+		return;
+	/* Lo más que escribe un dibujo: programa de vértices (~140), constantes
+	 * (82), texturas, estado y el dibujo. */
+	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
+	if (!g->state_valid)
+		fixed_state();
+	if (!g->prog_3d) {
+		rsxLoadVertexProgram(ctx, d3.vp, d3.vp_ucode);
+		g->prog_3d = 1;
+		d3.c_valid = 0;
+	}
+	int fp = d->ntex > 2 ? 2 : d->ntex;
+	if (g->fp_3d != fp) {
+		rsxLoadFragmentProgramLocation(ctx, d3.fp[fp], d3.fp_offset[fp], GCM_LOCATION_RSX);
+		g->fp_3d = fp;
+	}
+	if (!g->arrays_bound)
+		bind_arrays();
+	set_scissor(d->scissor);
+	set_blend(d->blend);
+	set_depth(d->depth);
+	set_cull(d->cull);
+	set_alpha(d->alpha_ref);
+	for (int i = 0; i < fp; i++)
+		set_texture(i, &d->tex[i]);
+	set_constants(d);
+	rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, first, count);
+}

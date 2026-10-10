@@ -3,9 +3,10 @@
  * rsxkit — capa gráfica genérica para el RSX de la PS3 (PSL1GHT).
  *
  * No sabe nada de ningún sistema emulado: inicializa el RSX y la salida de
- * video, lleva el ciclo de cuadro (doble búfer y flip en vsync) y presenta
- * imágenes 2D de la CPU escaladas a la pantalla. Documentación de la API en
- * lib/rsxkit/README.md.
+ * video, lleva el ciclo de cuadro (doble búfer y flip en vsync), presenta
+ * imágenes 2D de la CPU escaladas a la pantalla y dibuja triángulos en
+ * destinos de render con una combinación lineal de dos texturas y el color
+ * del vértice. Documentación de la API en lib/rsxkit/README.md.
  *
  * Uso típico, una vez por cuadro:
  *
@@ -125,6 +126,122 @@ void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *rect);
 
 /* Rectángulo de pantalla para una imagen de width × height con `view`. */
 rsxkit_rect rsxkit_layout(uint32_t width, uint32_t height, const rsxkit_view *view);
+
+/* ---- Memoria principal y barreras ------------------------------------------ */
+
+/* Hace visible para el RSX `size` bytes de memoria principal (dirección
+ * alineada a 1 MB, tamaño múltiplo de 1 MB) y da su offset. Vértices y
+ * texturas pueden vivir ahí: los escribe la CPU o un SPE sin copiarlos. */
+int rsxkit_map_main(void *ptr, uint32_t size, uint32_t *offset);
+
+/* Barrera: marca lo enviado hasta ahora; rsxkit_fence_done dice si el RSX
+ * ya lo terminó y rsxkit_fence_wait lo espera. */
+uint32_t rsxkit_fence(void);
+int rsxkit_fence_done(uint32_t fence);
+void rsxkit_fence_wait(uint32_t fence);
+
+/* ---- Destinos de render ------------------------------------------------------ */
+
+typedef struct rsxkit_target rsxkit_target;  /* color X8R8G8B8, memoria local */
+typedef struct rsxkit_depth rsxkit_depth;    /* profundidad Z24S8, memoria local */
+
+/* NULL si no hay memoria. El color nace negro y la profundidad en 1. */
+rsxkit_target *rsxkit_target_create(uint32_t width, uint32_t height);
+void rsxkit_target_destroy(rsxkit_target *t);
+void rsxkit_target_size(const rsxkit_target *t, uint32_t *width, uint32_t *height);
+rsxkit_depth *rsxkit_depth_create(uint32_t width, uint32_t height);
+void rsxkit_depth_destroy(rsxkit_depth *d);
+
+/* Dibujar en t (y su profundidad d, que puede ser NULL) hasta otro
+ * rsxkit_bind o rsxkit_frame_begin. Las coordenadas de los vértices y
+ * tijeras están en un espacio lógico de lw × lh (y hacia abajo) que se
+ * estira sobre todo el destino: un núcleo de 320×240 puede dibujar a 3×
+ * sin cambiar sus coordenadas. */
+void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh);
+
+#define RSXKIT_CLEAR_COLOR 0x1u
+#define RSXKIT_CLEAR_DEPTH 0x2u
+/* Borra en el destino ligado el rectángulo lógico (x0, y0, x1, y1), o todo
+ * si rect es NULL. depth en [0, 1]. */
+void rsxkit_clear(uint32_t flags, uint32_t rgb, float depth, const float rect[4]);
+
+/* Presenta en el cuadro en curso la región `src` del destino (píxeles del
+ * destino; NULL = todo), acomodada como una imagen de img_w × img_h con
+ * `view`. */
+void rsxkit_target_present(rsxkit_target *t, const rsxkit_rect *src, uint32_t img_w, uint32_t img_h,
+			   const rsxkit_view *view, rsxkit_rect *out);
+
+/* ---- Dibujo 3D ------------------------------------------------------------------ */
+
+/* Vértice de 32 bytes: posición homogénea en el espacio lógico (x/w, y/w en
+ * píxeles lógicos, z/w en [0, 1], w > 0 delante), coordenadas de textura y
+ * color RGBA de 8 bits. */
+typedef struct rsxkit_vertex {
+	float pos[4];
+	float st[2];
+	uint8_t rgba[4];
+	uint32_t pad;
+} rsxkit_vertex;
+
+enum { RSXKIT_MEM_LOCAL = 0, RSXKIT_MEM_MAIN = 1 };
+enum { RSXKIT_WRAP_CLAMP = 0, RSXKIT_WRAP_REPEAT = 1, RSXKIT_WRAP_MIRROR = 2 };
+
+/* Textura lineal (pitch múltiplo de 64, offset alineado a 128). Las
+ * coordenadas del vértice se llevan a la textura con
+ * u = s·xf[0] + xf[2], v = t·xf[1] + xf[3] (normalizadas). */
+typedef struct rsxkit_texture {
+	uint32_t offset;
+	uint32_t pitch;
+	uint16_t width, height;
+	uint8_t location;   /* RSXKIT_MEM_* */
+	uint8_t format;     /* rsxkit_format */
+	uint8_t wrap_s, wrap_t;
+	uint8_t filter;     /* rsxkit_filter */
+	uint8_t pad[3];
+	float xf[4];
+} rsxkit_texture;
+
+typedef enum rsxkit_blend {
+	RSXKIT_BLEND_OFF,    /* reemplaza */
+	RSXKIT_BLEND_ALPHA,  /* src·a + dst·(1 − a) */
+	RSXKIT_BLEND_ADD,    /* src·a + dst */
+	RSXKIT_BLEND_NONE,   /* no escribe color */
+} rsxkit_blend;
+
+typedef enum rsxkit_cull {
+	RSXKIT_CULL_NONE,
+	RSXKIT_CULL_FRONT,  /* frente: antihorario con la y hacia arriba */
+	RSXKIT_CULL_BACK,
+} rsxkit_cull;
+
+#define RSXKIT_DEPTH_TEST   0x1u
+#define RSXKIT_DEPTH_WRITE  0x2u
+#define RSXKIT_DEPTH_OFFSET 0x4u  /* acercar un poco (calcomanías) */
+
+/* Términos de la combinación lineal que evalúa el RSX por píxel:
+ *   X_i = k[i][0] + k[i][1]·C + k[i][2]·C.aaaa    (C = color del vértice)
+ *   color = T0·X0 + T0.aaaa·X1 + T1·X2 + T1.aaaa·X3 + X4
+ * Con niebla, X_i.rgb se escala por (1 − C.a) y X4.rgb suma fog·C.a. */
+enum { RSXKIT_K_T0, RSXKIT_K_T0A, RSXKIT_K_T1, RSXKIT_K_T1A, RSXKIT_K_ONE, RSXKIT_K_TERMS };
+
+typedef struct rsxkit_draw {
+	uint8_t blend;      /* rsxkit_blend */
+	uint8_t cull;       /* rsxkit_cull */
+	uint8_t depth;      /* RSXKIT_DEPTH_* */
+	uint8_t alpha_ref;  /* 0: sin prueba de alfa; si no, pasa alfa >= ref/255 */
+	uint8_t ntex;       /* texturas: 0, 1 o 2 */
+	uint8_t fog;
+	uint8_t pad[2];
+	float scissor[4];   /* x0, y0, x1, y1 lógicos */
+	float fog_color[4];
+	rsxkit_texture tex[2];
+	float k[RSXKIT_K_TERMS][3][4];
+} rsxkit_draw;
+
+/* Arreglo de rsxkit_vertex que usan los dibujos siguientes. */
+void rsxkit_vertices(uint32_t offset, uint8_t location);
+/* Triángulos sueltos: vértices first .. first + count − 1 del arreglo. */
+void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count);
 
 #ifdef __cplusplus
 }

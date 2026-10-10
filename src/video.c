@@ -77,6 +77,7 @@ int rsxkit_init(const rsxkit_config *cfg)
 	uint32_t host = cfg && cfg->host_size ? cfg->host_size : DEFAULT_HOST_SIZE;
 
 	memset(g, 0, sizeof *g);
+	g->fp_3d = -1;
 	g->host = memalign(1024 * 1024, host);
 	if (!g->host || rsxInit(&g->ctx, cmd, host, g->host) != 0 || !g->ctx)
 		return RSXKIT_EINIT;
@@ -116,6 +117,8 @@ void rsxkit_shutdown(void)
 	gcmSetWaitFlip(g->ctx);
 	rsxFinish(g->ctx, 1);
 	rsxkit_fb_shutdown();
+	rsxkit_3d_shutdown();
+	rsxkit_target_shutdown();
 	for (int i = 0; i < 2; i++)
 		if (g->color_buf[i])
 			rsxFree(g->color_buf[i]);
@@ -133,12 +136,13 @@ void rsxkit_finish(void)
 {
 	struct rsxkit_state *g = &rsxkit_g;
 	uint32_t v = ++g->finish_seq;
+	rsxkit_reserve(16);
 	rsxSetWriteBackendLabel(g->ctx, RSXKIT_LABEL_FINISH, v);
 	rsxFlushBuffer(g->ctx);
 	rsxkit_wait_label(RSXKIT_LABEL_FINISH, v);
 }
 
-static void set_surface(void)
+void rsxkit_bind_screen(void)
 {
 	struct rsxkit_state *g = &rsxkit_g;
 	gcmSurface sf;
@@ -161,6 +165,8 @@ static void set_surface(void)
 	sf.width = g->screen.width;
 	sf.height = g->screen.height;
 	rsxSetSurface(g->ctx, &sf);
+	rsxkit_set_2d_state();
+	g->screen_bound = 1;
 }
 
 void rsxkit_set_2d_state(void)
@@ -187,8 +193,8 @@ void rsxkit_set_2d_state(void)
 void rsxkit_frame_begin(uint32_t clear_rgb)
 {
 	struct rsxkit_state *g = &rsxkit_g;
-	set_surface();
-	rsxkit_set_2d_state();
+	rsxkit_reserve(256);
+	rsxkit_bind_screen();
 	rsxSetClearColor(g->ctx, clear_rgb & 0x00FFFFFFu);
 	rsxSetClearDepthStencil(g->ctx, 0xFFFFFF00u);
 	rsxClearSurface(g->ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A |
@@ -205,6 +211,7 @@ void rsxkit_frame_end(void)
 			sysUsleep(200);
 	}
 	gcmResetFlipStatus();
+	rsxkit_reserve(64);
 	gcmSetFlip(g->ctx, g->cur);
 	rsxFlushBuffer(g->ctx);
 	gcmSetWaitFlip(g->ctx);

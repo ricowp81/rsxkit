@@ -1,0 +1,30 @@
+/* SPDX-License-Identifier: MIT */
+/*
+ * rsxkit — vertex program de la combinación lineal (draw3d.c).
+ *
+ * position: coordenadas homogéneas en el espacio lógico del destino
+ * (x/w, y/w en píxeles lógicos con la y hacia abajo; z/w en [0, 1]).
+ * space = (2/ancho, 2/alto, 0, 0) lo lleva al espacio de recorte.
+ *
+ * Términos X_i = k[3i] + k[3i+1]·C + k[3i+2]·C.aaaa con C el color del
+ * vértice; con niebla (fog.a = 1) el color se mezcla hacia fog.rgb según
+ * C.a. Coordenadas de textura: uv_i = st · xf[i].xy + xf[i].zw.
+ */
+void main(float4 position : POSITION, float2 st : TEXCOORD0, float4 color : COLOR0,
+	uniform float4 space, uniform float4 xf[2], uniform float4 k[15], uniform float4 fog,
+	out float4 oPosition : POSITION, out float4 oUV : TEXCOORD0,
+	out float4 oX0 : TEXCOORD1, out float4 oX1 : TEXCOORD2, out float4 oX2 : TEXCOORD3,
+	out float4 oX3 : TEXCOORD4, out float4 oX4 : TEXCOORD5)
+{
+	oPosition = float4(position.x * space.x - position.w, position.w - position.y * space.y,
+	                   position.z * 2.0 - position.w, position.w);
+	oUV = float4(st * xf[0].xy + xf[0].zw, st * xf[1].xy + xf[1].zw);
+	float4 ca = color.aaaa;
+	float f = fog.a * color.a;
+	float4 keep = float4(1.0 - f, 1.0 - f, 1.0 - f, 1.0);
+	oX0 = (k[0] + k[1] * color + k[2] * ca) * keep;
+	oX1 = (k[3] + k[4] * color + k[5] * ca) * keep;
+	oX2 = (k[6] + k[7] * color + k[8] * ca) * keep;
+	oX3 = (k[9] + k[10] * color + k[11] * ca) * keep;
+	oX4 = (k[12] + k[13] * color + k[14] * ca) * keep + float4(fog.rgb * f, 0.0);
+}

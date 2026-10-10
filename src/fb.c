@@ -97,6 +97,8 @@ static int init_programs(void)
 	return RSXKIT_OK;
 }
 
+/* El 3D cambia el programa: el del blit se vuelve a cargar siempre. */
+
 rsxkit_fb *rsxkit_fb_create(uint32_t max_width, uint32_t max_height)
 {
 	if (!max_width || !max_height || max_width > 4096 || max_height > 4096 || init_programs() != RSXKIT_OK)
@@ -216,7 +218,6 @@ static void vertex(gcmContextData *ctx, float x, float y, float u, float v)
 
 void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 {
-	gcmContextData *ctx = rsxkit_g.ctx;
 	if (!fb || !fb->used || fb->slot < 0)
 		return;
 	static const rsxkit_view def = { RSXKIT_SCALE_FIT, RSXKIT_FILTER_LINEAR, 0.0f };
@@ -227,7 +228,23 @@ void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 		*out = r;
 
 	int s = fb->slot;
-	const struct fmt_info *fi = &formats[fb->format];
+	rsxkit_blit(fb->tex_offset[s], fb->pitch, fb->w, fb->h, 1.0f, 1.0f, fb->format, &r, view->filter);
+	fb->last_use[s] = ++fb->seq;
+	rsxSetWriteBackendLabel(rsxkit_g.ctx, RSXKIT_LABEL_FB(fb->index, s), fb->seq);
+}
+
+void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u1, float v1,
+		 rsxkit_format format, const rsxkit_rect *rp, rsxkit_filter filter)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	if (init_programs() != RSXKIT_OK)
+		return;
+	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
+	rsxkit_leave_3d();
+	if (!rsxkit_g.screen_bound)
+		rsxkit_bind_screen();
+	rsxkit_rect r = *rp;
+	const struct fmt_info *fi = &formats[format];
 	gcmTexture tex;
 	memset(&tex, 0, sizeof tex);
 	tex.format = fi->gcm | GCM_TEXTURE_FORMAT_LIN | GCM_TEXTURE_FORMAT_NRM;
@@ -235,14 +252,14 @@ void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 	tex.dimension = GCM_TEXTURE_DIMS_2D;
 	tex.cubemap = GCM_FALSE;
 	tex.remap = fi->remap;
-	tex.width = fb->w;
-	tex.height = fb->h;
+	tex.width = tex_w;
+	tex.height = tex_h;
 	tex.depth = 1;
 	tex.location = GCM_LOCATION_RSX;
-	tex.pitch = fb->pitch;
-	tex.offset = fb->tex_offset[s];
+	tex.pitch = pitch;
+	tex.offset = offset;
 
-	u8 filt = view->filter == RSXKIT_FILTER_NEAREST ? GCM_TEXTURE_NEAREST : GCM_TEXTURE_LINEAR;
+	u8 filt = filter == RSXKIT_FILTER_NEAREST ? GCM_TEXTURE_NEAREST : GCM_TEXTURE_LINEAR;
 	u8 unit = (u8)prog.tex_unit;
 	rsxInvalidateTextureCache(ctx, GCM_INVALIDATE_TEXTURE);
 	rsxLoadTexture(ctx, unit, &tex);
@@ -257,11 +274,8 @@ void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 	float x0 = (float)r.x, y0 = (float)r.y, x1 = x0 + r.w, y1 = y0 + r.h;
 	rsxDrawVertexBegin(ctx, GCM_TYPE_TRIANGLE_STRIP);
 	vertex(ctx, x0, y0, 0.0f, 0.0f);
-	vertex(ctx, x1, y0, 1.0f, 0.0f);
-	vertex(ctx, x0, y1, 0.0f, 1.0f);
-	vertex(ctx, x1, y1, 1.0f, 1.0f);
+	vertex(ctx, x1, y0, u1, 0.0f);
+	vertex(ctx, x0, y1, 0.0f, v1);
+	vertex(ctx, x1, y1, u1, v1);
 	rsxDrawVertexEnd(ctx);
-
-	fb->last_use[s] = ++fb->seq;
-	rsxSetWriteBackendLabel(ctx, RSXKIT_LABEL_FB(fb->index, s), fb->seq);
 }
