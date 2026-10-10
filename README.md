@@ -7,11 +7,13 @@ cualquier núcleo o programa homebrew que necesite presentar imágenes de la
 CPU en pantalla. Licencia **MIT** (`LICENSE`), para que también la puedan
 usar proyectos que no son GPL.
 
-Estado: primera pieza. Hoy hace la inicialización del RSX y la salida de
-video, el ciclo de cuadro con doble búfer y un framebuffer 2D escalado. Lo
-que viene (generador de fragment programs en tiempo de ejecución,
-conversión de texturas en SPE, filtros de posprocesado) se agregará con la
-misma regla: nada específico de un sistema emulado.
+Estado: hace la inicialización del RSX y la salida de video, el ciclo de
+cuadro con doble búfer, un framebuffer 2D escalado y dibujo 3D en destinos
+de render a una escala entera (triángulos con una combinación lineal de dos
+texturas y el color del vértice). Lo que viene (generador de fragment
+programs en tiempo de ejecución, conversión de texturas en SPE, filtros de
+posprocesado) se agregará con la misma regla: nada específico de un sistema
+emulado.
 
 ## Compilar
 
@@ -107,16 +109,83 @@ Vista (`rsxkit_view`):
   de tele de definición estándar); `0` = píxeles cuadrados. Tiene en cuenta
   que en 480/576 los píxeles de la superficie no son cuadrados.
 
+### Memoria principal y barreras
+
+| Función | Qué hace |
+|---|---|
+| `int rsxkit_map_main(void *p, uint32_t size, uint32_t *offset)` | Hace visible para el RSX memoria principal (alineada a 1 MB, tamaño múltiplo de 1 MB) y da su offset. Ahí pueden vivir vértices y texturas que escribe la CPU o un SPE, sin copias. |
+| `uint32_t rsxkit_fence(void)` | Marca lo enviado hasta ahora. |
+| `int rsxkit_fence_done(uint32_t f)` / `void rsxkit_fence_wait(uint32_t f)` | ¿Ya lo terminó el RSX? / esperarlo. Sirve para reutilizar un búfer que el RSX estaba leyendo. |
+
+### Destinos de render
+
+Un destino es una superficie X8R8G8B8 en la memoria local; la profundidad
+(Z24S8) va aparte para que varios destinos compartan una. Al ligarlos se da
+un **espacio lógico** (por ejemplo 320×240) que se estira sobre todo el
+destino: un núcleo dibuja en sus coordenadas y la escala (2×, 3×…) la pone
+el tamaño del destino.
+
+| Función | Qué hace |
+|---|---|
+| `rsxkit_target *rsxkit_target_create(w, h)` / `rsxkit_target_destroy(t)` | Destino de color; nace negro. Hasta 8. |
+| `rsxkit_depth *rsxkit_depth_create(w, h)` / `rsxkit_depth_destroy(d)` | Profundidad; nace en 1. Debe ser al menos tan grande como el destino. |
+| `void rsxkit_bind(t, d, lw, lh)` | Dibujar en `t` (y `d`, o `NULL`) con espacio lógico `lw × lh`, hasta otro `rsxkit_bind` o `rsxkit_frame_begin`. |
+| `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). |
+| `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
+
+### Dibujo 3D
+
+```c
+rsxkit_vertices(offset_vb, RSXKIT_MEM_MAIN);  /* arreglo de rsxkit_vertex */
+rsxkit_bind(target, depth, 320, 240);
+rsxkit_draw d = { .blend = RSXKIT_BLEND_OFF, .depth = RSXKIT_DEPTH_TEST | RSXKIT_DEPTH_WRITE,
+                  .scissor = { 0, 0, 320, 240 }, .ntex = 1, ... };
+d.k[RSXKIT_K_T0][1][0..3] = 1;                /* color = textura × color del vértice */
+rsxkit_draw_triangles(&d, first, count);
+```
+
+- **Vértice** (`rsxkit_vertex`, 32 bytes): posición homogénea en el espacio
+  lógico (x/w, y/w en píxeles lógicos con la y hacia abajo, z/w en [0, 1],
+  w > 0 delante), coordenadas de textura `st` y color RGBA de 8 bits. La
+  perspectiva la corrige el RSX con la w.
+- **Combinación lineal** (por píxel):
+  `color = T0·X0 + T0.aaaa·X1 + T1·X2 + T1.aaaa·X3 + X4`, con
+  `X_i = k[i][0] + k[i][1]·C + k[i][2]·C.aaaa` y C el color del vértice
+  (los `X_i` los arma el vertex program). Representa exactamente cualquier
+  mezcla de dos texturas que no las multiplique entre sí; sirve para los
+  combiners de una consola o para el clásico textura × color.
+- **Texturas** (`rsxkit_texture`): lineales, en memoria local o principal,
+  con los formatos de `rsxkit_format`, repetición/espejo/límite, filtro y
+  la transformación `u = s·xf[0] + xf[2]`, `v = t·xf[1] + xf[3]`.
+- **Estado**: mezcla (opaca, alfa, aditiva, sin color), profundidad (prueba
+  LEQUAL, escritura, desplazamiento para calcomanías), recorte de caras
+  (frente = antihorario con la y hacia arriba), prueba de alfa, tijeras
+  lógicas y niebla por vértice (`fog`: mezcla hacia `fog_color` según
+  `C.a`). La z no se recorta contra los planos cercano y lejano: se satura.
+- `rsxkit_vertices` invalida las cachés de vértices y texturas del RSX:
+  llamarlo cada vez que cambió lo que hay en memoria.
+- rsxkit recuerda el estado y solo reenvía lo que cambió.
+
 ## Recursos del RSX que usa
 
-- Etiquetas 255 (`rsxkit_finish`) y de 254 hacia abajo, dos por
-  framebuffer (247–254 con 4 framebuffers). Las de 0 a 63 son del sistema.
+- Etiquetas 255 (`rsxkit_finish`), de 254 hacia abajo dos por framebuffer
+  (247–254 con 4 framebuffers) y 246 (barreras). Las de 0 a 63 son del
+  sistema.
+- Programas: el blit (`shaders/rsxkit_blit.*`) y el 3D
+  (`rsxkit_lincomb.vcg` con 19 constantes desde la 0, y
+  `rsxkit_lincomb{0,1,2}.fcg`); unidades de textura 0 y 1; atributos
+  POSITION (0), COLOR0 (3) y TEXCOORD0 (8).
+- Búfer de comandos: antes de cada operación rsxkit pide el espacio que
+  puede usar, para que las funciones de PSL1GHT no cambien de segmento por
+  su cuenta (su callback tiene un error que corrompe el FIFO; ver
+  `src/fifo.c`). Quien mezcle llamadas propias a PSL1GHT con rsxkit debería
+  hacer lo mismo o usar búferes de comandos grandes.
 - Unidad de textura que asigna `cgcomp` al sampler del fragment program
   (normalmente la 0) y los atributos de vértice POSITION (0) y TEXCOORD0 (8),
   en modo inmediato.
 - Memoria local: 2 búferes de color + 1 de profundidad del tamaño de la
-  pantalla (11 MB a 720p, 24 MB a 1080) y `2 × max_w × max_h × 4` bytes por
-  framebuffer.
+  pantalla (11 MB a 720p, 24 MB a 1080), `2 × max_w × max_h × 4` bytes por
+  framebuffer y `w × h × 4` por destino y por profundidad.
 
 ## Origen del código
 
