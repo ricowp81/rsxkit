@@ -91,6 +91,25 @@ static void free_screen_buffers(void)
 	g->depth_buf = NULL;
 }
 
+/* Profundidad de la pantalla: del tamaño de la salida o de lo reservado
+ * con rsxkit_depth_reserve, lo mayor en cada lado. */
+static int alloc_screen_depth(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	uint32_t w = g->screen.width > g->depth_min_w ? g->screen.width : g->depth_min_w;
+	uint32_t h = g->screen.height > g->depth_min_h ? g->screen.height : g->depth_min_h;
+	g->depth_pitch = (w * 4 + 63) & ~63u;
+	g->depth_buf = rsxMemalign(64, h * g->depth_pitch);
+	if (!g->depth_buf) {
+		g->depth_w = g->depth_h = 0;
+		return RSXKIT_ENOMEM;
+	}
+	rsxAddressToOffset(g->depth_buf, &g->depth_offset);
+	g->depth_w = g->depth_pitch / 4;
+	g->depth_h = h;
+	return RSXKIT_OK;
+}
+
 /* Búferes de color (con su display buffer) y de profundidad del tamaño de
  * la superficie de salida en curso. */
 static int alloc_screen_buffers(void)
@@ -98,7 +117,6 @@ static int alloc_screen_buffers(void)
 	struct rsxkit_state *g = &rsxkit_g;
 	uint32_t w = g->screen.width, h = g->screen.height;
 	g->color_pitch = w * 4;
-	g->depth_pitch = w * 4;
 	for (int i = 0; i < 2; i++) {
 		g->color_buf[i] = rsxMemalign(64, h * g->color_pitch);
 		if (!g->color_buf[i])
@@ -106,11 +124,41 @@ static int alloc_screen_buffers(void)
 		rsxAddressToOffset(g->color_buf[i], &g->color_offset[i]);
 		gcmSetDisplayBuffer(i, g->color_offset[i], g->color_pitch, w, h);
 	}
-	g->depth_buf = rsxMemalign(64, h * g->depth_pitch);
-	if (!g->depth_buf)
-		return RSXKIT_ENOMEM;
-	rsxAddressToOffset(g->depth_buf, &g->depth_offset);
-	return RSXKIT_OK;
+	return alloc_screen_depth();
+}
+
+int rsxkit_depth_reserve(uint32_t width, uint32_t height)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	if (!g->ctx)
+		return RSXKIT_EINIT;
+	if (width > 4096 || height > 4096)
+		return RSXKIT_EARG;
+	uint32_t old_w = g->depth_min_w, old_h = g->depth_min_h;
+	uint32_t w = g->screen.width > width ? g->screen.width : width;
+	uint32_t h = g->screen.height > height ? g->screen.height : height;
+	g->depth_min_w = width;
+	g->depth_min_h = height;
+	if (g->depth_buf && g->depth_w == ((w * 4 + 63) & ~63u) / 4 && g->depth_h == h)
+		return RSXKIT_OK;
+	/* Que el RSX no use la vieja; lo ligado deja de valer. */
+	rsxkit_finish();
+	if (g->depth_buf)
+		rsxFree(g->depth_buf);
+	g->depth_buf = NULL;
+	rsxkit_bound.target = NULL;
+	rsxkit_bound.depth = NULL;
+	g->screen_bound = 0;
+	g->state_valid = 0;
+	int rc = alloc_screen_depth();
+	if (rc != RSXKIT_OK) {
+		/* La de antes cabe en lo que se acaba de soltar. */
+		g->depth_min_w = old_w;
+		g->depth_min_h = old_h;
+		if (alloc_screen_depth() != RSXKIT_OK)
+			return RSXKIT_ENOMEM;
+	}
+	return rc;
 }
 
 int rsxkit_init(const rsxkit_config *cfg)

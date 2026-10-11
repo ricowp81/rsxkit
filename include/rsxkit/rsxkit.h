@@ -60,6 +60,7 @@ enum {
 	RSXKIT_EVIDEO = -2,    /* ninguna resolución disponible o videoConfigure */
 	RSXKIT_ENOMEM = -3,    /* memoria local del RSX */
 	RSXKIT_EARG = -4,      /* argumento fuera de rango */
+	RSXKIT_EDEPTH = -5,    /* ninguna zeta cubre el destino (rsxkit_depth_reserve) */
 };
 
 typedef struct rsxkit_screen {
@@ -170,8 +171,23 @@ void rsxkit_depth_destroy(rsxkit_depth *d);
  * rsxkit_bind o rsxkit_frame_begin. Las coordenadas de los vértices y
  * tijeras están en un espacio lógico de lw × lh (y hacia abajo) que se
  * estira sobre todo el destino: un núcleo de 320×240 puede dibujar a 3×
- * sin cambiar sus coordenadas. */
-void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh);
+ * sin cambiar sus coordenadas.
+ *
+ * El RSX siempre tiene una zeta ligada junto al color. Sin d (o con una
+ * más chica que t), se liga la profundidad de la pantalla con la prueba y
+ * la escritura apagadas; si tampoco cubre a t (un destino más grande que la
+ * pantalla, como 1600×1200 en 720p), no se liga nada y devuelve
+ * RSXKIT_EDEPTH: una zeta más chica que el color puede fallar o recortar en
+ * el RSX. Para eso está rsxkit_depth_reserve. Devuelve 0 o RSXKIT_EARG /
+ * RSXKIT_EDEPTH (lo ligado antes sigue ligado). */
+int rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh);
+/* Agranda la profundidad de la pantalla a al menos width × height (lo que
+ * mida el mayor destino que se vaya a ligar sin profundidad propia; 0 × 0
+ * vuelve al tamaño de la pantalla). Reserva ahora, fuera del bucle de
+ * dibujo: espera al RSX y olvida lo ligado. Se conserva en
+ * rsxkit_video_reconfigure. Devuelve 0, RSXKIT_EARG o RSXKIT_ENOMEM (queda
+ * la reserva anterior). */
+int rsxkit_depth_reserve(uint32_t width, uint32_t height);
 /* Lo mismo sobre la pantalla del cuadro en curso (después de
  * rsxkit_frame_begin), sin profundidad: menús y superposiciones. */
 void rsxkit_bind_frame(float lw, float lh);
@@ -309,13 +325,16 @@ void rsxkit_texture_sync(void);
  * dicen cuándo está escrito. Los píxeles de 16 bits quedan en el orden de
  * bytes de la PS3 (big-endian), como los lee rsxkit_fb_upload. Deshace el
  * destino ligado: volver a llamar a rsxkit_bind para seguir dibujando.
- * Devuelve 0 o RSXKIT_EARG. */
+ * Devuelve 0, RSXKIT_EARG o RSXKIT_EDEPTH (img_w × img_h no cabe en la
+ * profundidad de la pantalla, que va ligada con la salida). */
 int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t dst_offset, uint32_t dst_pitch,
 		       uint32_t img_w, uint32_t img_h, rsxkit_format format);
 
 /* Copia todo el destino `src` en `dst` (del mismo tamaño o mayor; se
  * estira si no), para leer como textura lo que se está dibujando en
- * `src`. Deja `dst` ligado, sin profundidad: volver a rsxkit_bind. */
+ * `src`. Deja `dst` ligado, sin profundidad: volver a rsxkit_bind.
+ * Devuelve 0, RSXKIT_EARG, RSXKIT_ENOMEM o RSXKIT_EDEPTH (como rsxkit_bind
+ * sin profundidad). */
 int rsxkit_target_copy(rsxkit_target *dst, const rsxkit_target *src);
 
 /* Pinta todo el destino con una imagen de w × h píxeles de la memoria
@@ -323,7 +342,8 @@ int rsxkit_target_copy(rsxkit_target *dst, const rsxkit_target *src);
  * `format`), estirada texel por píxel (sin filtro): para cebar un destino
  * con lo que la CPU dejó en su memoria antes de que el 3D dibuje encima.
  * Deja el destino ligado, sin profundidad: volver a rsxkit_bind con ella.
- * Devuelve 0 o RSXKIT_EARG. */
+ * Devuelve 0, RSXKIT_EARG o RSXKIT_EDEPTH (como rsxkit_bind sin
+ * profundidad). */
 int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
 		       rsxkit_format format);
 

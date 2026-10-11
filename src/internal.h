@@ -23,6 +23,11 @@ struct rsxkit_state {
 	uint32_t color_offset[2], depth_offset;
 	uint32_t *color_buf[2];
 	uint32_t *depth_buf;
+	/* La profundidad de la pantalla mide depth_w × depth_h: el mayor entre
+	 * la pantalla y lo pedido con rsxkit_depth_reserve (depth_min_*). Es la
+	 * que liga un destino sin profundidad propia, así que rsxkit_bind no
+	 * liga un destino que no quepa en ella. */
+	uint32_t depth_w, depth_h, depth_min_w, depth_min_h;
 	uint32_t cur;           /* búfer en que se dibuja */
 	uint32_t finish_seq;
 	uint32_t fence_seq;

@@ -160,13 +160,16 @@ void rsxkit_target_shutdown(void)
 	memset(&rsxkit_bound, 0, sizeof rsxkit_bound);
 }
 
-void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
+int rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 {
 	struct rsxkit_state *g = &rsxkit_g;
 	if (!t || !t->used)
-		return;
+		return RSXKIT_EARG;
 	if (d && (!d->used || d->w < t->w || d->h < t->h))
 		d = NULL;
+	/* Nunca una zeta más chica que el color (ver rsxkit.h). */
+	if (!d && (g->depth_w < t->w || g->depth_h < t->h))
+		return RSXKIT_EDEPTH;
 	rsxkit_reserve(256);
 
 	gcmSurface sf;
@@ -182,8 +185,9 @@ void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 	}
 	sf.depthFormat = GCM_SURFACE_ZETA_Z24S8;
 	sf.depthLocation = GCM_LOCATION_RSX;
-	/* Sin profundidad propia se pone la de la pantalla, que nunca se toca:
-	 * draw3d.c apaga la prueba y la escritura. */
+	/* Sin profundidad propia se pone la de la pantalla, que cubre al
+	 * destino (arriba) y nunca se toca: draw3d.c apaga la prueba y la
+	 * escritura. */
 	sf.depthOffset = d ? d->offset : g->depth_offset;
 	sf.depthPitch = d ? d->pitch : g->depth_pitch;
 	sf.type = GCM_SURFACE_TYPE_LINEAR;
@@ -208,6 +212,7 @@ void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 	rsxkit_bound.scissor_valid = 0;
 	g->screen_bound = 0;
 	g->state_valid = 0;
+	return RSXKIT_OK;
 }
 
 void rsxkit_bind_frame(float lw, float lh)
@@ -320,6 +325,9 @@ int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t 
 	if (!t || !t->used || !img_w || !img_h || img_w > 4096 || img_h > 4096 || !read_surface_format(format, &gcm, &bpp) ||
 	    (dst_offset & 127) || (dst_pitch & 63) || dst_pitch < img_w * bpp)
 		return RSXKIT_EARG;
+	/* La salida va con la profundidad de la pantalla: tiene que cubrirla. */
+	if (img_w > g->depth_w || img_h > g->depth_h)
+		return RSXKIT_EDEPTH;
 	rsxkit_rect s = src ? *src : (rsxkit_rect){ 0, 0, t->w, t->h };
 	if (s.x < 0 || s.y < 0 || !s.w || !s.h || (uint32_t)s.x + s.w > t->w || (uint32_t)s.y + s.h > t->h)
 		return RSXKIT_EARG;
@@ -388,7 +396,9 @@ int rsxkit_target_copy(rsxkit_target *dst, const rsxkit_target *src)
 		return RSXKIT_EARG;
 	if (rsxkit_blit_init() != RSXKIT_OK)
 		return RSXKIT_ENOMEM;
-	rsxkit_bind(dst, NULL, (float)dst->w, (float)dst->h);
+	int rc = rsxkit_bind(dst, NULL, (float)dst->w, (float)dst->h);
+	if (rc != RSXKIT_OK)
+		return rc;
 	gcmContextData *ctx = rsxkit_g.ctx;
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
 	rsxkit_leave_3d();
@@ -418,7 +428,9 @@ int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch
 		return RSXKIT_ENOMEM;
 	/* Ligar el destino entero con el estado 2D (sin profundidad ni mezcla)
 	 * y pintarlo con la imagen estirada, texel por píxel. */
-	rsxkit_bind(t, NULL, (float)t->w, (float)t->h);
+	int rc = rsxkit_bind(t, NULL, (float)t->w, (float)t->h);
+	if (rc != RSXKIT_OK)
+		return rc;
 	gcmContextData *ctx = rsxkit_g.ctx;
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
 	rsxkit_leave_3d();
