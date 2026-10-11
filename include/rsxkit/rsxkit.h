@@ -160,6 +160,9 @@ void rsxkit_depth_destroy(rsxkit_depth *d);
  * estira sobre todo el destino: un núcleo de 320×240 puede dibujar a 3×
  * sin cambiar sus coordenadas. */
 void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh);
+/* Lo mismo sobre la pantalla del cuadro en curso (después de
+ * rsxkit_frame_begin), sin profundidad: menús y superposiciones. */
+void rsxkit_bind_frame(float lw, float lh);
 
 #define RSXKIT_CLEAR_COLOR 0x1u
 #define RSXKIT_CLEAR_DEPTH 0x2u

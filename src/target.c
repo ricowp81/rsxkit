@@ -207,6 +207,21 @@ void rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 	g->state_valid = 0;
 }
 
+void rsxkit_bind_frame(float lw, float lh)
+{
+	/* Un destino que es el búfer trasero: no está en targets[], así que
+	 * nadie lo libera. */
+	static struct rsxkit_target frame;
+	struct rsxkit_state *g = &rsxkit_g;
+	frame.used = 1;
+	frame.w = g->screen.width;
+	frame.h = g->screen.height;
+	frame.pitch = g->color_pitch;
+	frame.offset = g->color_offset[g->cur];
+	frame.mem = g->color_buf[g->cur];
+	rsxkit_bind(&frame, NULL, lw, lh);
+}
+
 /* Rectángulo lógico → píxeles del destino, recortado. */
 void rsxkit_logical_rect(const float r[4], uint32_t out[4])
 {

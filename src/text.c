@@ -8,6 +8,7 @@
 
 #include "rsxkit/text.h"
 
+#include "font.h"
 #include "font_8x13.h"
 
 _Static_assert(FONT_W == RSXKIT_FONT_W && FONT_H == RSXKIT_FONT_H && FONT_ASCENT == RSXKIT_FONT_ASCENT,
@@ -84,9 +85,7 @@ void rsxkit_fill(const rsxkit_canvas *c, int32_t x, int32_t y, int32_t w, int32_
 		fill_packed(c, x, y, w, h, rsxkit_color(c->format, rgb));
 }
 
-/* Siguiente punto de código de *s (avanza *s); REPLACEMENT si la secuencia
- * no es UTF-8 válido (consume un byte). */
-static uint32_t next_cp(const char **s)
+uint32_t rsxkit_utf8_next(const char **s)
 {
 	const uint8_t *p = (const uint8_t *)*s;
 	uint32_t c = p[0];
@@ -121,13 +120,13 @@ uint32_t rsxkit_text_cells(const char *utf8)
 	uint32_t n = 0;
 	if (utf8)
 		while (*utf8) {
-			next_cp(&utf8);
+			rsxkit_utf8_next(&utf8);
 			n++;
 		}
 	return n;
 }
 
-static int glyph_index(uint32_t cp)
+static int find_glyph(uint32_t cp)
 {
 	int lo = 0, hi = FONT_GLYPHS - 1;
 	while (lo <= hi) {
@@ -144,16 +143,30 @@ static int glyph_index(uint32_t cp)
 
 int rsxkit_font_has(uint32_t codepoint)
 {
-	return glyph_index(codepoint) >= 0;
+	return find_glyph(codepoint) >= 0;
+}
+
+int rsxkit_glyph_total(void)
+{
+	return FONT_GLYPHS;
+}
+
+int rsxkit_glyph_index(uint32_t cp)
+{
+	int g = find_glyph(cp);
+	return g >= 0 ? g : find_glyph('?');
+}
+
+const uint8_t *rsxkit_glyph_rows(int index)
+{
+	return font_rows[index >= 0 && index < FONT_GLYPHS ? index : 0];
 }
 
 static void glyph(const rsxkit_canvas *c, int32_t x, int32_t y, uint32_t cp, uint32_t v, uint32_t k)
 {
-	int g = glyph_index(cp);
-	if (g < 0)
-		g = glyph_index('?');
+	const uint8_t *rows = rsxkit_glyph_rows(rsxkit_glyph_index(cp));
 	for (int row = 0; row < FONT_H; row++) {
-		uint8_t bits = font_rows[g][row];
+		uint8_t bits = rows[row];
 		for (int col = 0; bits; col++, bits = (uint8_t)(bits << 1))
 			if (bits & 0x80)
 				fill_packed(c, x + col * (int32_t)k, y + row * (int32_t)k, (int32_t)k, (int32_t)k, v);
@@ -170,7 +183,7 @@ uint32_t rsxkit_text_draw(const rsxkit_canvas *c, int32_t x, int32_t y, const ch
 	uint32_t total = max_cells ? rsxkit_text_cells(utf8) : 0;
 	uint32_t n = 0;
 	while (*utf8) {
-		uint32_t cp = next_cp(&utf8);
+		uint32_t cp = rsxkit_utf8_next(&utf8);
 		if (max_cells && total > max_cells && n == max_cells - 1)
 			cp = ELLIPSIS;
 		glyph(c, x + (int32_t)(n * FONT_W * k), y, cp, v, k);
