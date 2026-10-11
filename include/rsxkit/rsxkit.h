@@ -277,6 +277,51 @@ void rsxkit_vertices(uint32_t offset, uint8_t location);
 /* Triángulos sueltos: vértices first .. first + count − 1 del arreglo. */
 void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count);
 
+/* ---- Un destino como textura y de vuelta a la memoria principal --------------
+ * Render a textura: lo dibujado en un destino se puede leer en un dibujo 3D
+ * (rsxkit_draw.tex) sin copiarlo. La textura son `rows` filas enteras del
+ * destino desde la fila `y0` (el offset de una textura va alineado a 128:
+ * una columna cualquiera no; la columna va en xf). Deja en `out` offset,
+ * pitch, tamaño, formato y lugar; quien llama pone wrap, filter y xf. El
+ * destino no puede ser el que está ligado. */
+void rsxkit_target_texture(const rsxkit_target *t, uint32_t y0, uint32_t rows, rsxkit_texture *out);
+/* Antes del primer dibujo que lea como textura un destino dibujado desde
+ * la última vez que se llamó: espera a que el RSX termine lo enviado e
+ * invalida su caché de texturas. */
+void rsxkit_texture_sync(void);
+
+/* Copia a la memoria principal (mapeada con rsxkit_map_main) la región
+ * `src` del destino (NULL: todo), reducida a img_w × img_h píxeles con
+ * filtro lineal, en `format` (RSXKIT_RGB565 o RSXKIT_XRGB8888) y con
+ * `dst_pitch` bytes por fila (múltiplo de 64; offset alineado a 128). Lo
+ * hace el RSX con el pipeline 3D sobre una superficie en memoria
+ * principal: encola el trabajo y vuelve; rsxkit_fence/rsxkit_fence_wait
+ * dicen cuándo está escrito. Los píxeles de 16 bits quedan en el orden de
+ * bytes de la PS3 (big-endian), como los lee rsxkit_fb_upload. Deshace el
+ * destino ligado: volver a llamar a rsxkit_bind para seguir dibujando.
+ * Devuelve 0 o RSXKIT_EARG. */
+int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t dst_offset, uint32_t dst_pitch,
+		       uint32_t img_w, uint32_t img_h, rsxkit_format format);
+
+/* Copia todo el destino `src` en `dst` (del mismo tamaño o mayor; se
+ * estira si no), para leer como textura lo que se está dibujando en
+ * `src`. Deja `dst` ligado, sin profundidad: volver a rsxkit_bind. */
+int rsxkit_target_copy(rsxkit_target *dst, const rsxkit_target *src);
+
+/* Pinta todo el destino con una imagen de w × h píxeles de la memoria
+ * principal mapeada (offset alineado a 128, pitch múltiplo de 64, en
+ * `format`), estirada texel por píxel (sin filtro): para cebar un destino
+ * con lo que la CPU dejó en su memoria antes de que el 3D dibuje encima.
+ * Deja el destino ligado, sin profundidad: volver a rsxkit_bind con ella.
+ * Devuelve 0 o RSXKIT_EARG. */
+int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
+		       rsxkit_format format);
+
+/* RGB565 (16 bits, orden de bytes de la máquina) → RGBA5551 con alfa 1,
+ * n píxeles; dst y src pueden ser el mismo. Para dejar en el formato de
+ * una consola de 16 bits lo que escribe rsxkit_target_read. */
+void rsxkit_pixels_565_to_5551(uint16_t *dst, const uint16_t *src, uint32_t n);
+
 #ifdef __cplusplus
 }
 #endif

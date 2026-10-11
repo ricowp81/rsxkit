@@ -201,11 +201,15 @@ rsxkit_rect rsxkit_layout(uint32_t width, uint32_t height, const rsxkit_view *vi
 	return r;
 }
 
-static void vertex(gcmContextData *ctx, float x, float y, float u, float v)
+int rsxkit_blit_init(void)
 {
-	const rsxkit_screen *sc = &rsxkit_g.screen;
+	return init_programs();
+}
+
+static void vertex(gcmContextData *ctx, float x, float y, float u, float v, uint32_t sw, uint32_t sh)
+{
 	f32 uv[2] = { u, v };
-	f32 pos[4] = { 2.0f * x / sc->width - 1.0f, 1.0f - 2.0f * y / sc->height, 0.0f, 1.0f };
+	f32 pos[4] = { 2.0f * x / sw - 1.0f, 1.0f - 2.0f * y / sh, 0.0f, 1.0f };
 	rsxDrawVertex2f(ctx, GCM_VERTEX_ATTRIB_TEX0, uv);
 	rsxDrawVertex4f(ctx, GCM_VERTEX_ATTRIB_POS, pos);  /* la posición emite el vértice */
 }
@@ -230,13 +234,24 @@ void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u0, float v0, float u1,
 		 float v1, rsxkit_format format, const rsxkit_rect *rp, rsxkit_filter filter)
 {
-	gcmContextData *ctx = rsxkit_g.ctx;
 	if (init_programs() != RSXKIT_OK)
 		return;
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
 	rsxkit_leave_3d();
 	if (!rsxkit_g.screen_bound)
 		rsxkit_bind_screen();
+	rsxkit_blit_to(offset, RSXKIT_MEM_LOCAL, pitch, tex_w, tex_h, u0, v0, u1, v1, format, rp, rsxkit_g.screen.width,
+		       rsxkit_g.screen.height, filter);
+}
+
+void rsxkit_blit_to(uint32_t offset, uint8_t location, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u0,
+		    float v0, float u1, float v1, rsxkit_format format, const rsxkit_rect *rp, uint32_t surf_w,
+		    uint32_t surf_h, rsxkit_filter filter)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	if (init_programs() != RSXKIT_OK)
+		return;
+	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
 	rsxkit_rect r = *rp;
 	const struct fmt_info *fi = &formats[format];
 	gcmTexture tex;
@@ -249,7 +264,7 @@ void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h
 	tex.width = tex_w;
 	tex.height = tex_h;
 	tex.depth = 1;
-	tex.location = GCM_LOCATION_RSX;
+	tex.location = location == RSXKIT_MEM_MAIN ? GCM_LOCATION_CELL : GCM_LOCATION_RSX;
 	tex.pitch = pitch;
 	tex.offset = offset;
 
@@ -267,9 +282,9 @@ void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h
 
 	float x0 = (float)r.x, y0 = (float)r.y, x1 = x0 + r.w, y1 = y0 + r.h;
 	rsxDrawVertexBegin(ctx, GCM_TYPE_TRIANGLE_STRIP);
-	vertex(ctx, x0, y0, u0, v0);
-	vertex(ctx, x1, y0, u1, v0);
-	vertex(ctx, x0, y1, u0, v1);
-	vertex(ctx, x1, y1, u1, v1);
+	vertex(ctx, x0, y0, u0, v0, surf_w, surf_h);
+	vertex(ctx, x1, y0, u1, v0, surf_w, surf_h);
+	vertex(ctx, x0, y1, u0, v1, surf_w, surf_h);
+	vertex(ctx, x1, y1, u1, v1, surf_w, surf_h);
 	rsxDrawVertexEnd(ctx);
 }

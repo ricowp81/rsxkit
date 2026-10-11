@@ -135,6 +135,19 @@ el tamaño del destino.
 | `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). |
 | `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino (cualquier rectángulo: sirve para recortar el overscan) acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
 
+Un destino como textura, y de vuelta a la memoria principal (efectos de
+framebuffer de un núcleo: render a textura, lo que el CPU emulado lee de su
+memoria de video):
+
+| Función | Qué hace |
+|---|---|
+| `void rsxkit_target_texture(t, y0, rows, out)` | Llena una `rsxkit_texture` para leer en un dibujo 3D `rows` filas enteras del destino desde `y0` (el offset de una textura va alineado a 128: la columna va en `xf`). Deja offset, pitch, tamaño, formato y lugar; quien llama pone wrap, filter y `xf`. No puede ser el destino ligado. |
+| `void rsxkit_texture_sync(void)` | Antes del primer dibujo que lea como textura un destino dibujado en el mismo tramo: espera al RSX e invalida su caché de texturas. |
+| `int rsxkit_target_copy(dst, src)` | Copia todo `src` en `dst` (para leer lo que se está dibujando: se copia y se lee la copia). Deja `dst` ligado sin profundidad. |
+| `int rsxkit_target_fill(t, src_offset, src_pitch, w, h, format)` | Pinta todo el destino con una imagen de la memoria principal mapeada, estirada sin filtro (cebar un destino con lo que la CPU dejó en su memoria). Deja `t` ligado sin profundidad. |
+| `int rsxkit_target_read(t, src, dst_offset, dst_pitch, img_w, img_h, format)` | Reduce la región `src` del destino a `img_w × img_h` (filtro lineal) y la escribe en memoria principal mapeada, en `RSXKIT_RGB565` o `RSXKIT_XRGB8888`, con el pipeline 3D sobre una superficie en memoria principal. Encola y vuelve: `rsxkit_fence` / `rsxkit_fence_wait` dicen cuándo está. Los píxeles de 16 bits quedan en orden de bytes de la PS3. Deshace lo ligado. |
+| `void rsxkit_pixels_565_to_5551(dst, src, n)` | RGB565 → RGBA5551 con alfa 1 (el formato de 16 bits de una consola), cuatro píxeles por palabra; `dst` y `src` pueden ser el mismo. |
+
 ### Dibujo 3D
 
 ```c
