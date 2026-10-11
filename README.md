@@ -61,6 +61,7 @@ después de `rsxkit_init` y `rsxkit_fb_create`.
 |---|---|
 | `int rsxkit_init(const rsxkit_config *cfg)` | Reserva la memoria principal mapeada al RSX y el búfer de comandos, elige la primera resolución disponible de `cfg->modes` (por omisión 720p, 1080, 480, 576), crea dos búferes de color X8R8G8B8 y uno de profundidad en la memoria local del RSX. `cfg` puede ser `NULL`. Devuelve `RSXKIT_OK` o un código negativo (`RSXKIT_EINIT`, `RSXKIT_EVIDEO`, `RSXKIT_ENOMEM`). |
 | `void rsxkit_shutdown(void)` | Espera al RSX y libera lo reservado. |
+| `int rsxkit_video_reconfigure(const rsxkit_config *cfg)` | Cambia la salida de video sin reiniciar el RSX (`rsxInit`/gcm solo se inicializa una vez por proceso y la memoria mapeada no se desmapea): elige el primer modo de `cfg->modes` que la tele dé (`NULL`: lista por omisión), rehace `videoConfigure` y los búferes de color y profundidad. Conserva contexto, memoria mapeada, framebuffers, destinos y la 2D; `rsxkit_screen_info()` cambia, así que hay que recalcular lo que dependa del tamaño. Se llama entre cuadros. Si falla deja el modo anterior y devuelve el error. |
 | `const rsxkit_screen *rsxkit_screen_info(void)` | Ancho y alto de la superficie de salida y proporción de la tele (`aspect`: 16/9 o 4/3, según la configuración de video del sistema). |
 
 ### Cuadro
