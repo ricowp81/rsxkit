@@ -12,7 +12,10 @@
 
 #include "internal.h"
 
-#define TARGET_MAX 8
+/* Superficies y profundidades vivas a la vez. Un emulador de N64 en una
+ * pausa de Zelda tiene 9 color images vivas más un scratch; con 8, la
+ * novena no se creaba y lo dibujado en ella se perdía. */
+#define TARGET_MAX 16
 /* 128: la presentación lee el destino como textura desde una fila
  * cualquiera, y el offset de una textura va alineado a 128. */
 #define SURF_ALIGN 128
