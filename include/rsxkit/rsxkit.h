@@ -22,6 +22,8 @@
 
 #include <stdint.h>
 
+#include "rsxkit/fpgen.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -220,11 +222,23 @@ typedef enum rsxkit_cull {
 #define RSXKIT_DEPTH_WRITE  0x2u
 #define RSXKIT_DEPTH_OFFSET 0x4u  /* acercar un poco (calcomanías) */
 
-/* Términos de la combinación lineal que evalúa el RSX por píxel:
- *   X_i = k[i][0] + k[i][1]·C + k[i][2]·C.aaaa    (C = color del vértice)
- *   color = T0·X0 + T0.aaaa·X1 + T1·X2 + T1.aaaa·X3 + X4
- * Con niebla, X_i.rgb se escala por (1 − C.a) y X4.rgb suma fog·C.a. */
-enum { RSXKIT_K_T0, RSXKIT_K_T0A, RSXKIT_K_T1, RSXKIT_K_T1A, RSXKIT_K_ONE, RSXKIT_K_TERMS };
+/* Lo que evalúa el RSX por píxel, con
+ *   X_j = k[j][0] + k[j][1]·C + k[j][2]·C.aaaa    (C = color del vértice)
+ * (los X_j los arma el vertex program; con niebla, X_j.rgb se escala por
+ * (1 − C.a) y el término constante suma fog·C.a):
+ * - nterms = 0: la combinación lineal fija, con programas precompilados,
+ *     color = T0·X0 + T0.aaaa·X1 + T1·X2 + T1.aaaa·X3 + X4
+ *   (términos RSXKIT_K_*; el constante es X4).
+ * - nterms > 0: un fragment program generado para estos términos
+ *   (rsxkit/fpgen.h; se genera una vez y queda en caché),
+ *     color = Σ_j (Π factors[j]) · X_j
+ *   con los factores RSXKIT_FP_* (texturas, sus alfas, color del vértice
+ *   y su alfa; 0 termina la lista). Con niebla, el color de niebla se suma
+ *   al primer término sin factores: incluir uno. Hasta RSXKIT_K_TERMS
+ *   términos de RSXKIT_K_FACTORS factores. */
+enum { RSXKIT_K_T0, RSXKIT_K_T0A, RSXKIT_K_T1, RSXKIT_K_T1A, RSXKIT_K_ONE, RSXKIT_K_LINCOMB };
+#define RSXKIT_K_TERMS   RSXKIT_FP_MAX_TERMS
+#define RSXKIT_K_FACTORS RSXKIT_FP_MAX_FACTORS
 
 typedef struct rsxkit_draw {
 	uint8_t blend;      /* rsxkit_blend */
@@ -233,12 +247,27 @@ typedef struct rsxkit_draw {
 	uint8_t alpha_ref;  /* 0: sin prueba de alfa; si no, pasa alfa >= ref/255 */
 	uint8_t ntex;       /* texturas: 0, 1 o 2 */
 	uint8_t fog;
-	uint8_t pad[2];
+	uint8_t nterms;     /* 0: combinación lineal fija; si no, términos con `factors` */
+	uint8_t pad;
 	float scissor[4];   /* x0, y0, x1, y1 lógicos */
 	float fog_color[4];
 	rsxkit_texture tex[2];
+	uint8_t factors[RSXKIT_K_TERMS][RSXKIT_K_FACTORS];  /* RSXKIT_FP_*, 0 = fin */
+	uint8_t pad2[4];
 	float k[RSXKIT_K_TERMS][3][4];
 } rsxkit_draw;
+
+/* Programas generados: cuántos distintos hay en la caché, cuántos se
+ * generaron en total (con los desalojos, si la caché se llenó) y cuántas
+ * veces se cargó un programa distinto del anterior (incluidos los
+ * precompilados). */
+typedef struct rsxkit_fp_stats {
+	uint32_t programs;
+	uint32_t generated;
+	uint32_t evictions;
+	uint32_t loads;
+} rsxkit_fp_stats;
+void rsxkit_fp_get_stats(rsxkit_fp_stats *out);
 
 /* Arreglo de rsxkit_vertex que usan los dibujos siguientes. */
 void rsxkit_vertices(uint32_t offset, uint8_t location);
