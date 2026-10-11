@@ -18,6 +18,7 @@ struct rsxkit_state {
 	gcmContextData *ctx;
 	void *host;
 	rsxkit_screen screen;
+	int32_t mode_id;        /* VIDEO_RESOLUTION_* en uso */
 	uint32_t color_pitch, depth_pitch;
 	uint32_t color_offset[2], depth_offset;
 	uint32_t *color_buf[2];

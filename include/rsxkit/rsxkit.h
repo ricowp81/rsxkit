@@ -43,6 +43,16 @@ typedef struct rsxkit_config {
 int rsxkit_init(const rsxkit_config *cfg);
 /* Espera al RSX y libera todo. */
 void rsxkit_shutdown(void);
+/* Cambia el modo de video sin reiniciar el RSX: elige el primer modo de
+ * cfg->modes que la tele dé (cfg NULL o sin modes: la lista por omisión de
+ * rsxkit_init; cmd_size y host_size se ignoran), rehace videoConfigure y los
+ * búferes de color y profundidad de la pantalla. Conserva el contexto, el
+ * búfer de comandos, la memoria mapeada, los framebuffers, los destinos y
+ * la 2D (rsxkit_screen_info() cambia: rehacer lo que dependa de su tamaño).
+ * Llamar entre cuadros, sin destino ligado. Devuelve 0 o un código negativo;
+ * si falla, deja el modo anterior (si tampoco se pudo, RSXKIT_ENOMEM y no
+ * hay pantalla válida). */
+int rsxkit_video_reconfigure(const rsxkit_config *cfg);
 
 enum {
 	RSXKIT_OK = 0,

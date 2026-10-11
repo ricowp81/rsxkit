@@ -33,29 +33,29 @@ void rsxkit_wait_label(uint8_t index, uint32_t value)
 		sysUsleep(30);
 }
 
-static int init_video(const rsxkit_config *cfg)
+/* Primer modo de la lista que la tele da; -1 si ninguno. */
+static int32_t pick_mode(const rsxkit_config *cfg, videoResolution *res)
 {
 	const int32_t *modes = cfg && cfg->modes ? cfg->modes : default_modes;
 	uint32_t n = cfg && cfg->modes ? cfg->num_modes : sizeof default_modes / sizeof default_modes[0];
-	videoResolution res;
-	int32_t id = -1;
 
 	for (uint32_t i = 0; i < n; i++) {
 		if (videoGetResolutionAvailability(VIDEO_PRIMARY, modes[i], VIDEO_ASPECT_AUTO, 0) == 1 &&
-		    videoGetResolution(modes[i], &res) == 0) {
-			id = modes[i];
-			break;
-		}
+		    videoGetResolution(modes[i], res) == 0)
+			return modes[i];
 	}
-	if (id < 0)
-		return RSXKIT_EVIDEO;
+	return -1;
+}
 
+/* videoConfigure del modo `id` y la superficie de salida resultante. */
+static int set_mode(int32_t id, const videoResolution *res)
+{
 	videoConfiguration vc;
 	memset(&vc, 0, sizeof vc);
 	vc.resolution = (u8)id;
 	vc.format = VIDEO_BUFFER_FORMAT_XRGB;
 	vc.aspect = VIDEO_ASPECT_AUTO;
-	vc.pitch = res.width * 4;
+	vc.pitch = res->width * 4;
 	if (videoConfigure(VIDEO_PRIMARY, &vc, NULL, 0) != 0)
 		return RSXKIT_EVIDEO;
 
@@ -64,9 +64,52 @@ static int init_video(const rsxkit_config *cfg)
 	if (videoGetState(VIDEO_PRIMARY, 0, &st) == 0 && st.displayMode.aspect != VIDEO_ASPECT_AUTO)
 		wide = st.displayMode.aspect == VIDEO_ASPECT_16_9;
 
-	rsxkit_g.screen.width = res.width;
-	rsxkit_g.screen.height = res.height;
+	rsxkit_g.screen.width = res->width;
+	rsxkit_g.screen.height = res->height;
 	rsxkit_g.screen.aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
+	rsxkit_g.mode_id = id;
+	return RSXKIT_OK;
+}
+
+static int init_video(const rsxkit_config *cfg)
+{
+	videoResolution res;
+	int32_t id = pick_mode(cfg, &res);
+	return id < 0 ? RSXKIT_EVIDEO : set_mode(id, &res);
+}
+
+static void free_screen_buffers(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	for (int i = 0; i < 2; i++) {
+		if (g->color_buf[i])
+			rsxFree(g->color_buf[i]);
+		g->color_buf[i] = NULL;
+	}
+	if (g->depth_buf)
+		rsxFree(g->depth_buf);
+	g->depth_buf = NULL;
+}
+
+/* Búferes de color (con su display buffer) y de profundidad del tamaño de
+ * la superficie de salida en curso. */
+static int alloc_screen_buffers(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	uint32_t w = g->screen.width, h = g->screen.height;
+	g->color_pitch = w * 4;
+	g->depth_pitch = w * 4;
+	for (int i = 0; i < 2; i++) {
+		g->color_buf[i] = rsxMemalign(64, h * g->color_pitch);
+		if (!g->color_buf[i])
+			return RSXKIT_ENOMEM;
+		rsxAddressToOffset(g->color_buf[i], &g->color_offset[i]);
+		gcmSetDisplayBuffer(i, g->color_offset[i], g->color_pitch, w, h);
+	}
+	g->depth_buf = rsxMemalign(64, h * g->depth_pitch);
+	if (!g->depth_buf)
+		return RSXKIT_ENOMEM;
+	rsxAddressToOffset(g->depth_buf, &g->depth_offset);
 	return RSXKIT_OK;
 }
 
@@ -88,20 +131,9 @@ int rsxkit_init(const rsxkit_config *cfg)
 	rsxkit_finish();
 	gcmSetFlipMode(GCM_FLIP_VSYNC);
 
-	uint32_t w = g->screen.width, h = g->screen.height;
-	g->color_pitch = w * 4;
-	g->depth_pitch = w * 4;
-	for (int i = 0; i < 2; i++) {
-		g->color_buf[i] = rsxMemalign(64, h * g->color_pitch);
-		if (!g->color_buf[i])
-			return RSXKIT_ENOMEM;
-		rsxAddressToOffset(g->color_buf[i], &g->color_offset[i]);
-		gcmSetDisplayBuffer(i, g->color_offset[i], g->color_pitch, w, h);
-	}
-	g->depth_buf = rsxMemalign(64, h * g->depth_pitch);
-	if (!g->depth_buf)
-		return RSXKIT_ENOMEM;
-	rsxAddressToOffset(g->depth_buf, &g->depth_offset);
+	rc = alloc_screen_buffers();
+	if (rc != RSXKIT_OK)
+		return rc;
 
 	/* Sin arreglos de vértices: rsxkit dibuja en modo inmediato. */
 	for (int i = 0; i < 16; i++)
@@ -119,12 +151,50 @@ void rsxkit_shutdown(void)
 	rsxkit_fb_shutdown();
 	rsxkit_3d_shutdown();
 	rsxkit_target_shutdown();
-	for (int i = 0; i < 2; i++)
-		if (g->color_buf[i])
-			rsxFree(g->color_buf[i]);
-	if (g->depth_buf)
-		rsxFree(g->depth_buf);
+	free_screen_buffers();
 	g->ctx = NULL;
+}
+
+int rsxkit_video_reconfigure(const rsxkit_config *cfg)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	if (!g->ctx)
+		return RSXKIT_EINIT;
+	videoResolution res, old_res;
+	int32_t id = pick_mode(cfg, &res);
+	if (id < 0)
+		return RSXKIT_EVIDEO;
+	int32_t old_id = g->mode_id;
+	if (videoGetResolution(old_id, &old_res) != 0)
+		return RSXKIT_EVIDEO;
+
+	/* Que el RSX no esté usando nada de lo que se libera: ni el flip en
+	 * vuelo ni los comandos pendientes. */
+	if (g->flip_pending)
+		while (gcmGetFlipStatus() != 0)
+			sysUsleep(200);
+	rsxkit_finish();
+
+	int rc = set_mode(id, &res);
+	if (rc == RSXKIT_OK) {
+		free_screen_buffers();
+		rc = alloc_screen_buffers();
+	}
+	if (rc != RSXKIT_OK) {
+		/* Vuelve al modo anterior: el libre de recién cabe de nuevo. */
+		free_screen_buffers();
+		int back = set_mode(old_id, &old_res);
+		if (back == RSXKIT_OK)
+			back = alloc_screen_buffers();
+		if (back != RSXKIT_OK)
+			rc = back;
+	}
+	g->cur = 0;
+	g->flip_pending = 0;
+	g->screen_bound = 0;
+	g->state_valid = 0;
+	gcmResetFlipStatus();
+	return rc;
 }
 
 const rsxkit_screen *rsxkit_screen_info(void)
