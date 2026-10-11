@@ -2,13 +2,16 @@
 /*
  * rsxkit — dibujo 3D: triángulos de un arreglo de rsxkit_vertex en el
  * destino ligado, con la combinación lineal de dos texturas y el color del
- * vértice (shaders/rsxkit_lincomb*.{vcg,fcg}).
+ * vértice (shaders/rsxkit_lincomb*.{vcg,fcg}) o con un fragment program
+ * generado para los términos del dibujo (fpgen.c, fpcache.c).
  *
  * El vertex program lleva las coordenadas lógicas al espacio de recorte y
- * arma los cinco términos X_i con constantes por dibujo; hay tres fragment
- * programs (sin textura, una, dos) que solo suman. Todo el estado se
- * recuerda y solo se reenvía lo que cambia: un núcleo puede mandar cientos
- * de dibujos por cuadro sin llenar el búfer de comandos de estado repetido.
+ * arma los siete términos X_j con constantes por dibujo; hay tres fragment
+ * programs precompilados (sin textura, una, dos) que solo suman los cinco
+ * primeros, y los generados multiplican sus factores por cada X_j. Todo el
+ * estado se recuerda y solo se reenvía lo que cambia: un núcleo puede
+ * mandar cientos de dibujos por cuadro sin llenar el búfer de comandos de
+ * estado repetido.
  *
  * Profundidad: z/w en [0, 1] con LEQUAL; sin recorte por los planos
  * cercano y lejano (la z se satura), como hacen los microcódigos de N64
@@ -23,7 +26,12 @@ extern const u8 rsxkit_lincomb0_fpo[];
 extern const u8 rsxkit_lincomb1_fpo[];
 extern const u8 rsxkit_lincomb2_fpo[];
 
-#define NCONST 19  /* space, xf[2], k[15], fog */
+/* Constantes del vertex program, en su orden: space, xf[2], k[21], fog,
+ * fogsel[2]. */
+#define NCONST   27
+#define C_K      3
+#define C_FOG    24
+#define C_FOGSEL 25
 
 struct tex_state {
 	int valid;
@@ -36,6 +44,8 @@ static struct {
 	void *vp_ucode;
 	rsxFragmentProgram *fp[3];
 	u32 fp_offset[3];
+	const void *cur_fp;     /* programa cargado (g->fp_3d >= 0): precompilado o de la caché */
+	uint32_t cur_fp_gen;    /* generación de la caché cuando se cargó */
 	u32 const_start;
 	rsxProgramConst *consts[NCONST];
 	int block;  /* constantes consecutivas: se suben de una vez */
@@ -51,7 +61,8 @@ static struct {
 
 static const char *const const_names[NCONST] = {
 	"space", "xf[0]", "xf[1]", "k[0]", "k[1]", "k[2]", "k[3]", "k[4]", "k[5]", "k[6]", "k[7]",
-	"k[8]", "k[9]", "k[10]", "k[11]", "k[12]", "k[13]", "k[14]", "fog",
+	"k[8]", "k[9]", "k[10]", "k[11]", "k[12]", "k[13]", "k[14]", "k[15]", "k[16]", "k[17]", "k[18]",
+	"k[19]", "k[20]", "fog", "fogsel[0]", "fogsel[1]",
 };
 
 static int init_3d(void)
@@ -82,6 +93,7 @@ static int init_3d(void)
 
 void rsxkit_3d_shutdown(void)
 {
+	rsxkit_fp_shutdown();
 	memset(&d3, 0, sizeof d3);
 }
 
@@ -303,10 +315,21 @@ static void set_constants(const rsxkit_draw *d)
 	for (int i = 0; i < 2; i++)
 		if (i < d->ntex)
 			memcpy(c[1 + i], d->tex[i].xf, sizeof c[1 + i]);
-	memcpy(c[3], d->k, sizeof d->k);
+	memcpy(c[C_K], d->k, sizeof d->k);
 	if (d->fog) {
-		memcpy(c[18], d->fog_color, sizeof c[18]);
-		c[18][3] = 1.0f;
+		memcpy(c[C_FOG], d->fog_color, sizeof c[C_FOG]);
+		c[C_FOG][3] = 1.0f;
+		/* El color de niebla va al término constante: X4 en la combinación
+		 * lineal, el primero sin factores en un programa generado. */
+		int fog_term = RSXKIT_K_ONE;
+		if (d->nterms) {
+			fog_term = -1;
+			for (int j = 0; j < d->nterms && fog_term < 0; j++)
+				if (!d->factors[j][0])
+					fog_term = j;
+		}
+		if (fog_term >= 0)
+			c[C_FOGSEL + fog_term / 4][fog_term % 4] = 1.0f;
 	}
 	if (d3.c_valid && !memcmp(c, d3.c, sizeof c))
 		return;
@@ -329,7 +352,7 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	if (!count || !d3.vb_set || !rsxkit_bound.target || g->screen_bound || init_3d() != RSXKIT_OK)
 		return;
 	/* Lo más que escribe un dibujo: programa de vértices (~140), constantes
-	 * (82), texturas, estado y el dibujo. */
+	 * (~140), programa de fragmentos (~22), texturas, estado y el dibujo. */
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
 	if (!g->state_valid)
 		fixed_state();
@@ -338,10 +361,31 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 		g->prog_3d = 1;
 		d3.c_valid = 0;
 	}
-	int fp = d->ntex > 2 ? 2 : d->ntex;
-	if (g->fp_3d != fp) {
-		rsxLoadFragmentProgramLocation(ctx, d3.fp[fp], d3.fp_offset[fp], GCM_LOCATION_RSX);
-		g->fp_3d = fp;
+	/* Programa: precompilado por número de texturas, o generado para los
+	 * términos del dibujo (y cacheado). */
+	int ntex = d->ntex > 2 ? 2 : d->ntex;
+	const void *want = d3.fp[ntex];
+	const rsxFragmentProgram *hdr = d3.fp[ntex];
+	u32 offset = d3.fp_offset[ntex];
+	if (d->nterms) {
+		rsxkit_fp_desc desc;
+		memset(&desc, 0, sizeof desc);
+		desc.ntex = (uint8_t)ntex;
+		desc.nterms = d->nterms > RSXKIT_K_TERMS ? RSXKIT_K_TERMS : d->nterms;
+		memcpy(desc.factors, d->factors, sizeof desc.factors);
+		const struct rsxkit_fp_cached *fc = rsxkit_fp_lookup(&desc);
+		if (!fc)
+			return;  /* descripción inválida o sin memoria: no se dibuja */
+		want = fc;
+		hdr = &fc->hdr;
+		offset = fc->offset;
+	}
+	if (g->fp_3d < 0 || d3.cur_fp != want || d3.cur_fp_gen != rsxkit_fp_generation()) {
+		rsxLoadFragmentProgramLocation(ctx, hdr, offset, GCM_LOCATION_RSX);
+		g->fp_3d = 1;
+		d3.cur_fp = want;
+		d3.cur_fp_gen = rsxkit_fp_generation();
+		rsxkit_fp_count_load();
 	}
 	if (!g->arrays_bound)
 		bind_arrays();
@@ -350,7 +394,7 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	set_depth(d->depth);
 	set_cull(d->cull);
 	set_alpha(d->alpha_ref);
-	for (int i = 0; i < fp; i++)
+	for (int i = 0; i < ntex; i++)
 		set_texture(i, &d->tex[i]);
 	set_constants(d);
 	rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, first, count);

@@ -222,13 +222,13 @@ void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 		*out = r;
 
 	int s = fb->slot;
-	rsxkit_blit(fb->tex_offset[s], fb->pitch, fb->w, fb->h, 1.0f, 1.0f, fb->format, &r, view->filter);
+	rsxkit_blit(fb->tex_offset[s], fb->pitch, fb->w, fb->h, 0.0f, 0.0f, 1.0f, 1.0f, fb->format, &r, view->filter);
 	fb->last_use[s] = ++fb->seq;
 	rsxSetWriteBackendLabel(rsxkit_g.ctx, RSXKIT_LABEL_FB(fb->index, s), fb->seq);
 }
 
-void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u1, float v1,
-		 rsxkit_format format, const rsxkit_rect *rp, rsxkit_filter filter)
+void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u0, float v0, float u1,
+		 float v1, rsxkit_format format, const rsxkit_rect *rp, rsxkit_filter filter)
 {
 	gcmContextData *ctx = rsxkit_g.ctx;
 	if (init_programs() != RSXKIT_OK)
@@ -267,9 +267,9 @@ void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h
 
 	float x0 = (float)r.x, y0 = (float)r.y, x1 = x0 + r.w, y1 = y0 + r.h;
 	rsxDrawVertexBegin(ctx, GCM_TYPE_TRIANGLE_STRIP);
-	vertex(ctx, x0, y0, 0.0f, 0.0f);
-	vertex(ctx, x1, y0, u1, 0.0f);
-	vertex(ctx, x0, y1, 0.0f, v1);
+	vertex(ctx, x0, y0, u0, v0);
+	vertex(ctx, x1, y0, u1, v0);
+	vertex(ctx, x0, y1, u0, v1);
 	vertex(ctx, x1, y1, u1, v1);
 	rsxDrawVertexEnd(ctx);
 }

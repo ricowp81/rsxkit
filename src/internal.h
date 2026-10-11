@@ -69,9 +69,24 @@ void rsxkit_target_shutdown(void);
 /* Copia un fragment program a la memoria del RSX, con interpolación de
  * perspectiva en todas sus entradas (fprog.c). NULL si no hay memoria. */
 void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset);
-/* Dibuja una textura lineal X8R8G8B8 de la memoria local como un
- * rectángulo en la pantalla (fb.c). */
-void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u1, float v1,
-		 rsxkit_format format, const rsxkit_rect *r, rsxkit_filter filter);
+/* Programas generados (fpcache.c): el de una descripción, generado y
+ * subido la primera vez; NULL si no es válida o no hay memoria. `hdr` y
+ * `offset` son lo que pide rsxLoadFragmentProgramLocation. */
+struct rsxkit_fp_cached {
+	rsxkit_fp_desc desc;
+	rsxFragmentProgram hdr;
+	u32 offset;
+};
+const struct rsxkit_fp_cached *rsxkit_fp_lookup(const rsxkit_fp_desc *desc);
+/* Cambia cada vez que la caché se vacía: lo que apuntaba a una entrada ya
+ * no vale. */
+uint32_t rsxkit_fp_generation(void);
+void rsxkit_fp_count_load(void);
+void rsxkit_fp_shutdown(void);
+/* Dibuja la región [u0, u1] × [v0, v1] (coordenadas normalizadas) de una
+ * textura lineal de la memoria local como un rectángulo en la pantalla
+ * (fb.c). */
+void rsxkit_blit(uint32_t offset, uint32_t pitch, uint32_t tex_w, uint32_t tex_h, float u0, float v0, float u1,
+		 float v1, rsxkit_format format, const rsxkit_rect *r, rsxkit_filter filter);
 
 #endif

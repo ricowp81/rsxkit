@@ -282,11 +282,13 @@ void rsxkit_target_present(rsxkit_target *t, const rsxkit_rect *src, uint32_t im
 	rsxkit_rect r = rsxkit_layout(img_w ? img_w : s.w, img_h ? img_h : s.h, view);
 	if (out)
 		*out = r;
-	/* La textura empieza en la esquina de la región (offset alineado a
-	 * 128: el destino y su pitch lo están; la x se redondea hacia abajo). */
-	uint32_t offset = t->offset + (uint32_t)s.y * t->pitch + (((uint32_t)s.x * 4) & ~127u);
+	/* La textura son las filas de la región, enteras (el offset de una
+	 * textura va alineado a 128: el destino y su pitch lo están, una
+	 * columna cualquiera no); la columna va en las coordenadas de textura. */
+	uint32_t offset = t->offset + (uint32_t)s.y * t->pitch;
+	float u0 = (float)s.x / t->w, u1 = (float)((uint32_t)s.x + s.w) / t->w;
 	/* Que el RSX termine de escribir el destino antes de leerlo. */
 	rsxSetWaitForIdle(rsxkit_g.ctx);
 	rsxInvalidateTextureCache(rsxkit_g.ctx, GCM_INVALIDATE_TEXTURE);
-	rsxkit_blit(offset, t->pitch, s.w, s.h, 1.0f, 1.0f, RSXKIT_XRGB8888, &r, view->filter);
+	rsxkit_blit(offset, t->pitch, t->w, s.h, u0, 0.0f, u1, 1.0f, RSXKIT_XRGB8888, &r, view->filter);
 }

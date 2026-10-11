@@ -10,12 +10,12 @@ usar proyectos que no son GPL.
 Estado: hace la inicialización del RSX y la salida de video, el ciclo de
 cuadro con doble búfer, un framebuffer 2D escalado, dibujo 3D en destinos
 de render a una escala entera (triángulos con una combinación lineal de dos
-texturas y el color del vértice), texto con una fuente de mapa de bits y
-un 2D para menús (rectángulos, texto escalable y ondas animadas en el
-RSX). Lo que viene (generador de fragment
-programs en tiempo de ejecución, conversión de texturas en SPE, filtros de
-posprocesado) se agregará con la misma regla: nada específico de un sistema
-emulado.
+texturas y el color del vértice, o con un fragment program generado en
+tiempo de ejecución para cualquier polinomio en esas entradas), texto con
+una fuente de mapa de bits y un 2D para menús (rectángulos, texto
+escalable y ondas animadas en el RSX). Lo que viene (conversión de
+texturas en SPE, filtros de posprocesado) se agregará con la misma regla:
+nada específico de un sistema emulado.
 
 ## Compilar
 
@@ -133,7 +133,7 @@ el tamaño del destino.
 | `rsxkit_depth *rsxkit_depth_create(w, h)` / `rsxkit_depth_destroy(d)` | Profundidad; nace en 1. Debe ser al menos tan grande como el destino. |
 | `void rsxkit_bind(t, d, lw, lh)` | Dibujar en `t` (y `d`, o `NULL`) con espacio lógico `lw × lh`, hasta otro `rsxkit_bind` o `rsxkit_frame_begin`. |
 | `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). |
-| `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
+| `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino (cualquier rectángulo: sirve para recortar el overscan) acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
 
 ### Dibujo 3D
 
@@ -150,12 +150,15 @@ rsxkit_draw_triangles(&d, first, count);
   lógico (x/w, y/w en píxeles lógicos con la y hacia abajo, z/w en [0, 1],
   w > 0 delante), coordenadas de textura `st` y color RGBA de 8 bits. La
   perspectiva la corrige el RSX con la w.
-- **Combinación lineal** (por píxel):
+- **Combinación lineal** (por píxel, con `nterms = 0`):
   `color = T0·X0 + T0.aaaa·X1 + T1·X2 + T1.aaaa·X3 + X4`, con
-  `X_i = k[i][0] + k[i][1]·C + k[i][2]·C.aaaa` y C el color del vértice
-  (los `X_i` los arma el vertex program). Representa exactamente cualquier
+  `X_j = k[j][0] + k[j][1]·C + k[j][2]·C.aaaa` y C el color del vértice
+  (los `X_j` los arma el vertex program). Representa exactamente cualquier
   mezcla de dos texturas que no las multiplique entre sí; sirve para los
-  combiners de una consola o para el clásico textura × color.
+  combiners de una consola o para el clásico textura × color. Son tres
+  fragment programs precompilados (sin textura, una, dos).
+- **Términos con programa generado** (`nterms > 0`): ver «Generador de
+  fragment programs» más abajo.
 - **Texturas** (`rsxkit_texture`): lineales, en memoria local o principal,
   con los formatos de `rsxkit_format`, repetición/espejo/límite, filtro y
   la transformación `u = s·xf[0] + xf[2]`, `v = t·xf[1] + xf[3]`.
@@ -167,6 +170,60 @@ rsxkit_draw_triangles(&d, first, count);
 - `rsxkit_vertices` invalida las cachés de vértices y texturas del RSX:
   llamarlo cada vez que cambió lo que hay en memoria.
 - rsxkit recuerda el estado y solo reenvía lo que cambió.
+
+### Generador de fragment programs
+
+No hay compilador Cg en la consola, así que para lo que la combinación
+lineal no representa (una textura por otra, el color del vértice por su
+alfa, cualquier producto de las entradas) rsxkit **emite el microcódigo
+del fragment program** del RSX en tiempo de ejecución (`rsxkit/fpgen.h`,
+`src/fpgen.c`) y lo cachea (`src/fpcache.c`). Un dibujo pide uno con
+`nterms > 0`:
+
+```c
+rsxkit_draw d = { ..., .ntex = 2, .nterms = 2 };
+/* color = T0·T1·X0 + X1 */
+d.factors[0][0] = RSXKIT_FP_T0; d.factors[0][1] = RSXKIT_FP_T1;
+d.k[0][0][0..3] = 1;                 /* X0 = 1 */
+d.k[1][1][0..3] = 1;                 /* X1 = C (color del vértice) */
+rsxkit_draw_triangles(&d, first, count);
+```
+
+- El programa calcula `color = saturate(Σ_j (Π factors[j]) · X_j)`, con
+  los mismos `X_j` del vertex program (`k[j]`, hasta `RSXKIT_K_TERMS` = 7
+  términos, uno por varying TEXCOORD1..7) y hasta `RSXKIT_K_FACTORS` = 4
+  factores por término: `RSXKIT_FP_T0`, `RSXKIT_FP_T0A` (alfa de la
+  textura 0, replicado), `RSXKIT_FP_T1`, `RSXKIT_FP_T1A`, `RSXKIT_FP_C`
+  (color del vértice) y `RSXKIT_FP_CA` (su alfa, replicado); 0 termina la
+  lista. Un término sin factores suma `X_j`.
+- Los cuatro canales van en paralelo: en el canal alfa cada textura
+  aporta su alfa y C su alfa, así que un combiner con alfa distinto del
+  color se expresa con coeficientes distintos en el cuarto carril de los
+  `k[j]`.
+- Con `fog`, el color de niebla se suma al **primer término sin
+  factores**: incluir uno (con `k` en cero si no hace falta para otra
+  cosa).
+- `rsxkit_fp_desc` (`ntex`, `nterms`, `factors`) identifica el programa;
+  la caché lo busca por hash de la descripción canónica (factores de cada
+  término ordenados; el orden de los términos sí cuenta, porque fija qué
+  `X_j` lee cada uno). Conviene que quien traduce ponga los términos en
+  un orden canónico para que el mismo conjunto dé siempre el mismo
+  programa. Un juego usa decenas de programas distintos; la caché guarda
+  128 en 96 KB de memoria local del RSX y, si se llena, espera al RSX y
+  se vacía (`rsxkit_fp_stats.evictions`).
+- Costo: 1 instrucción por textura, 1 por término más 1 por factor
+  adicional (y 1 más si el único factor es el color del vértice). Las
+  operaciones van en fp16, como las de cgcomp. Cambiar de programa son
+  ~20 palabras en el búfer de comandos; `rsxkit_fp_get_stats` cuenta
+  programas, generaciones y cargas.
+- El codificador (`rsxkit_fpgen_emit`) no depende de PSL1GHT: compila en
+  cualquier host y las pruebas unitarias de Salsa64 lo verifican con un
+  intérprete del microcódigo anclado a programas compilados por cgcomp
+  (`tests/unit/test_fpgen.c`, `tools/fpgen-ref.sh`). Puede usarse solo
+  para generar programas fuera de la consola.
+
+Formato del microcódigo: ver la cabecera de `src/fpgen.c` y
+`docs/rsx-notes.md` del repositorio de Salsa64.
 
 ### Texto en pantalla (`rsxkit/text.h`)
 
@@ -262,8 +319,9 @@ for (;;) {
   (247–254 con 4 framebuffers) y 246 (barreras). Las de 0 a 63 son del
   sistema.
 - Programas: el blit (`shaders/rsxkit_blit.*`) y el 3D
-  (`rsxkit_lincomb.vcg` con 19 constantes desde la 0, y
-  `rsxkit_lincomb{0,1,2}.fcg`); unidades de textura 0 y 1; atributos
+  (`rsxkit_lincomb.vcg` con 27 constantes desde la 0, salidas COLOR0 y
+  TEXCOORD0..7; `rsxkit_lincomb{0,1,2}.fcg` y los generados, en un pool
+  de 96 KB de memoria local); unidades de textura 0 y 1; atributos
   POSITION (0), COLOR0 (3) y TEXCOORD0 (8).
 - Búfer de comandos: antes de cada operación rsxkit pide el espacio que
   puede usar, para que las funciones de PSL1GHT no cambien de segmento por
@@ -281,9 +339,12 @@ for (;;) {
 ## Origen del código
 
 Código propio. La inicialización del RSX sigue el sample `rsxtest` de
-PSL1GHT (MIT). Los glifos de `src/font_8x13.h` son los de la fuente
-«fixed» 8x13 de X11 (gitlab.freedesktop.org/xorg/font/misc-misc,
-`8x13.bdf`, de dominio público). El agrandado de los glifos del atlas
-(`src/ui_geom.c`) aplica la regla de Scale2x/EPX, escrita aquí a partir de
-su descripción pública (no se copió código). No contiene código de
-proyectos GPL ni de proyectos sin licencia clara.
+PSL1GHT (MIT); el formato de instrucción del fragment program viene de
+`nvfx_shader.h` y `compilerfp.cpp` de cgcomp (PSL1GHT, MIT), cotejado con
+los programas que cgcomp compila de `shaders/rsxkit_lincomb*.fcg`. Los
+glifos de `src/font_8x13.h` son los de la fuente «fixed» 8x13 de X11
+(gitlab.freedesktop.org/xorg/font/misc-misc, `8x13.bdf`, de dominio
+público). El agrandado de los glifos del atlas (`src/ui_geom.c`) aplica la
+regla de Scale2x/EPX, escrita aquí a partir de su descripción pública (no
+se copió código). No contiene código de proyectos GPL ni de proyectos sin
+licencia clara.
