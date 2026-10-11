@@ -131,7 +131,7 @@ el tamaño del destino.
 | `rsxkit_depth *rsxkit_depth_create(w, h)` / `rsxkit_depth_destroy(d)` | Profundidad; nace en 1. Debe ser al menos tan grande como el destino. |
 | `void rsxkit_bind(t, d, lw, lh)` | Dibujar en `t` (y `d`, o `NULL`) con espacio lógico `lw × lh`, hasta otro `rsxkit_bind` o `rsxkit_frame_begin`. |
 | `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). |
-| `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
+| `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino (cualquier rectángulo: sirve para recortar el overscan) acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
 
 ### Dibujo 3D
 
