@@ -8,9 +8,10 @@ CPU en pantalla. Licencia **MIT** (`LICENSE`), para que también la puedan
 usar proyectos que no son GPL.
 
 Estado: hace la inicialización del RSX y la salida de video, el ciclo de
-cuadro con doble búfer, un framebuffer 2D escalado y dibujo 3D en destinos
+cuadro con doble búfer, un framebuffer 2D escalado, dibujo 3D en destinos
 de render a una escala entera (triángulos con una combinación lineal de dos
-texturas y el color del vértice). Lo que viene (generador de fragment
+texturas y el color del vértice) y texto con una fuente de mapa de bits
+para menús. Lo que viene (generador de fragment
 programs en tiempo de ejecución, conversión de texturas en SPE, filtros de
 posprocesado) se agregará con la misma regla: nada específico de un sistema
 emulado.
@@ -166,6 +167,46 @@ rsxkit_draw_triangles(&d, first, count);
   llamarlo cada vez que cambió lo que hay en memoria.
 - rsxkit recuerda el estado y solo reenvía lo que cambió.
 
+### Texto en pantalla (`rsxkit/text.h`)
+
+Para menús y mensajes: texto con una fuente de mapa de bits sobre una imagen
+en memoria principal (un **lienzo**), que después se presenta como cualquier
+otra con `rsxkit_fb_upload` + `rsxkit_fb_draw`. No usa el RSX ni PSL1GHT, no
+asigna memoria y compila en cualquier host (se puede probar en la PC).
+
+```c
+#include <rsxkit/text.h>
+
+static uint32_t px[360][640];
+rsxkit_canvas c = { px, 640, 360, 640 * 4, RSXKIT_XRGB8888 };
+rsxkit_fill(&c, 0, 0, 640, 360, 0x101820);
+rsxkit_text_draw(&c, 24, 14, "Elige un juego…", 0, 0xE8ECF0, 1);
+rsxkit_fb_upload(fb, px, 640, 360, 640 * 4, RSXKIT_XRGB8888);
+rsxkit_fb_draw(fb, &(rsxkit_view){ RSXKIT_SCALE_FIT, RSXKIT_FILTER_NEAREST, 16.0f / 9.0f }, NULL);
+```
+
+| Función | Qué hace |
+|---|---|
+| `uint32_t rsxkit_color(format, rgb)` | `0xRRGGBB` en el formato del lienzo (alfa opaco). |
+| `void rsxkit_fill(c, x, y, w, h, rgb)` | Rellena un rectángulo, recortado al lienzo. |
+| `uint32_t rsxkit_text_draw(c, x, y, utf8, max_cells, rgb, scale)` | Dibuja una cadena UTF-8 con la esquina superior izquierda de la primera celda en (x, y); cada píxel de la fuente como un cuadro de `scale × scale`. Solo pinta los píxeles de los glifos y recorta en los bordes. Si la cadena tiene más de `max_cells` celdas (0 = sin límite), dibuja `max_cells − 1` y «…». Devuelve las celdas dibujadas. |
+| `uint32_t rsxkit_text_cells(utf8)` | Caracteres de una cadena UTF-8. |
+| `int rsxkit_font_has(cp)` | ¿La fuente tiene ese punto de código? |
+
+- Fuente: la «fixed» 8x13 de X11 (paquete misc-misc de X.Org, **dominio
+  público**: «Public domain font. Share and enjoy.»), celda de
+  `RSXKIT_FONT_W × RSXKIT_FONT_H` = 8 × 13 con la línea base en la fila 11.
+  Trae ASCII, Latin-1 (acentos, ñ, ¿¡) y unos símbolos para menús: flechas
+  ← ↑ → ↓, triángulos ▲ ▼ ◀ ▶, ● ○ ■ □ •, — – « » y «…». Lo que no tiene se
+  dibuja como «?»; cada byte de una secuencia UTF-8 inválida, como «�».
+- La tabla de glifos (`src/font_8x13.h`) la genera `tools/bdf2c.py` desde
+  el BDF; para otra fuente BDF de 8 píxeles de ancho y celda fija basta
+  volver a correrlo.
+- Los píxeles se escriben en el orden de bytes de la PS3 (big-endian) sea
+  cual sea el host, en cualquiera de los formatos de `rsxkit_format`.
+- Con un lienzo de 640 × 360 a 720p (2×) o 1080 (3×) y
+  `RSXKIT_FILTER_NEAREST`, el texto sale nítido: 80 columnas × 27 filas.
+
 ## Recursos del RSX que usa
 
 - Etiquetas 255 (`rsxkit_finish`), de 254 hacia abajo dos por framebuffer
@@ -190,5 +231,7 @@ rsxkit_draw_triangles(&d, first, count);
 ## Origen del código
 
 Código propio. La inicialización del RSX sigue el sample `rsxtest` de
-PSL1GHT (MIT). No contiene código de proyectos GPL ni de proyectos sin
-licencia clara.
+PSL1GHT (MIT). Los glifos de `src/font_8x13.h` son los de la fuente
+«fixed» 8x13 de X11 (gitlab.freedesktop.org/xorg/font/misc-misc,
+`8x13.bdf`, de dominio público). No contiene código de proyectos GPL ni de
+proyectos sin licencia clara.
