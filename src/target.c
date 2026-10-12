@@ -371,6 +371,12 @@ int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t 
 	rsxSetCullFaceEnable(g->ctx, GCM_FALSE);
 	rsxSetBlendEnable(g->ctx, GCM_FALSE);
 	rsxSetAlphaTestEnable(g->ctx, GCM_FALSE);
+	/* Sin tramado: al escribir una superficie de 16 bits el RSX suma, si
+	 * está encendido, un patrón fijo por píxel antes de redondear. Una
+	 * imagen que vuelve a pasar por aquí cuadro tras cuadro (un efecto que
+	 * mezcla el cuadro con su copia anterior) acumula ese patrón y queda
+	 * como un tablero de ajedrez. Nadie lo vuelve a encender. */
+	rsxSetDitherEnable(g->ctx, GCM_FALSE);
 
 	/* Que el RSX termine de escribir el destino antes de leerlo; la
 	 * región son filas enteras y la columna va en u. */
