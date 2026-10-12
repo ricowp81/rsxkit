@@ -48,6 +48,12 @@ static void clear_cache(void)
 	fc.stats.programs = 0;
 }
 
+void rsxkit_fp_flush(void)
+{
+	if (fc.pool)
+		clear_cache();
+}
+
 uint32_t rsxkit_fp_generation(void)
 {
 	return fc.generation;

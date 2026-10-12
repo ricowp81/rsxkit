@@ -97,6 +97,20 @@ void rsxkit_3d_shutdown(void)
 	memset(&d3, 0, sizeof d3);
 }
 
+void rsxkit_forget_state(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	rsxkit_reserve(80);
+	for (int i = 0; i < 16; i++)
+		rsxBindVertexArrayAttrib(g->ctx, i, 0, 0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+	g->arrays_bound = 0;
+	rsxkit_leave_3d();
+	g->screen_bound = 0;
+	rsxkit_bound.target = NULL;
+	rsxkit_bound.depth = NULL;
+	rsxkit_bound.scissor_valid = 0;
+}
+
 void rsxkit_leave_3d(void)
 {
 	struct rsxkit_state *g = &rsxkit_g;
