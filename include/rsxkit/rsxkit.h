@@ -302,7 +302,8 @@ typedef struct rsxkit_draw {
 	uint8_t ntex;       /* texturas: 0, 1 o 2 */
 	uint8_t fog;
 	uint8_t nterms;     /* 0: combinación lineal fija; si no, términos con `factors` */
-	uint8_t pad;
+	uint8_t smooth;     /* 1: POLYGON_SMOOTH, también los píxeles cubiertos en parte
+			     * (el alfa sale multiplicado por la cobertura) */
 	float scissor[4];   /* x0, y0, x1, y1 lógicos */
 	float fog_color[4];
 	rsxkit_texture tex[2];

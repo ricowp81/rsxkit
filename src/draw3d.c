@@ -52,7 +52,7 @@ static struct {
 	float c[NCONST][4];
 	int c_valid;
 	/* Estado puesto. */
-	uint8_t blend, cull, depth, alpha_ref;
+	uint8_t blend, cull, depth, alpha_ref, smooth;
 	struct tex_state tex[2];
 	uint32_t vb_offset;
 	uint8_t vb_location;
@@ -167,7 +167,7 @@ static void fixed_state(void)
 	rsxSetFrontFace(ctx, GCM_FRONTFACE_CCW);
 	rsxSetPolygonOffset(ctx, -1.0f, -2.0f);
 	/* Forzar que el primer dibujo ponga todo. */
-	d3.blend = d3.cull = d3.depth = d3.alpha_ref = 0xFF;
+	d3.blend = d3.cull = d3.depth = d3.alpha_ref = d3.smooth = 0xFF;
 	d3.tex[0].valid = d3.tex[1].valid = 0;
 	rsxkit_bound.scissor_valid = 0;
 	g->state_valid = 1;
@@ -236,6 +236,14 @@ static void set_alpha(uint8_t ref)
 	rsxSetAlphaTestEnable(ctx, ref ? GCM_TRUE : GCM_FALSE);
 	if (ref)
 		rsxSetAlphaFunc(ctx, GCM_GEQUAL, ref);
+}
+
+static void set_smooth(uint8_t smooth)
+{
+	if (smooth == d3.smooth)
+		return;
+	d3.smooth = smooth;
+	rsxSetPolygonSmoothEnable(rsxkit_g.ctx, smooth ? GCM_TRUE : GCM_FALSE);
 }
 
 static void set_scissor(const float s[4])
@@ -408,6 +416,7 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	set_depth(d->depth);
 	set_cull(d->cull);
 	set_alpha(d->alpha_ref);
+	set_smooth(d->smooth);
 	for (int i = 0; i < ntex; i++)
 		set_texture(i, &d->tex[i]);
 	set_constants(d);
