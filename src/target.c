@@ -38,11 +38,40 @@ static struct rsxkit_depth depths[TARGET_MAX];
 /* Destino ligado (draw3d.c lo usa para el viewport y las tijeras). */
 struct rsxkit_bound rsxkit_bound;
 
+/* Lo mapeado con rsxkit_map_main, para revisarlo (rsxkit_main_maps_bad). */
+#define MAPS_MAX 16
+static struct {
+	void *ea;
+	uint32_t size, offset;
+} maps[MAPS_MAX];
+static unsigned nmaps;
+
 int rsxkit_map_main(void *ptr, uint32_t size, uint32_t *offset)
 {
 	if (!ptr || ((uintptr_t)ptr & 0xFFFFF) || (size & 0xFFFFF) || !size)
 		return RSXKIT_EARG;
-	return gcmMapMainMemory(ptr, size, offset) == 0 ? RSXKIT_OK : RSXKIT_ENOMEM;
+	if (gcmMapMainMemory(ptr, size, offset) != 0)
+		return RSXKIT_ENOMEM;
+	if (nmaps < MAPS_MAX) {
+		maps[nmaps].ea = ptr;
+		maps[nmaps].size = size;
+		maps[nmaps].offset = *offset;
+		nmaps++;
+	}
+	return RSXKIT_OK;
+}
+
+int rsxkit_main_maps_bad(void)
+{
+	int bad = 0;
+	for (unsigned i = 0; i < nmaps; i++) {
+		void *ea = NULL;
+		u32 off = 0;
+		if (gcmIoOffsetToAddress(maps[i].offset, &ea) != 0 || ea != maps[i].ea ||
+		    rsxAddressToOffset(maps[i].ea, &off) != 0 || off != maps[i].offset)
+			bad++;
+	}
+	return bad;
 }
 
 uint32_t rsxkit_fence(void)

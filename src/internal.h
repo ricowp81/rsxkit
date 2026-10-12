@@ -70,11 +70,20 @@ void rsxkit_fb_shutdown(void);
 /* Antes de dibujar en modo inmediato con otros programas: apaga los
  * arreglos de vértices del 3D y olvida su estado. */
 void rsxkit_leave_3d(void);
+/* Olvida todo el estado del RSX que rsxkit da por puesto (arreglos de
+ * vértices, programas, estado fijo y constantes del 3D, superficie): el
+ * próximo dibujo lo manda de nuevo. Después de cada flip (frame_end). */
+void rsxkit_forget_state(void);
 void rsxkit_3d_shutdown(void);
 void rsxkit_target_shutdown(void);
 /* Copia un fragment program a la memoria del RSX, con interpolación de
  * perspectiva en todas sus entradas (fprog.c). NULL si no hay memoria. */
 void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset);
+/* Programas subidos con rsxkit_fp_upload cuya copia en la memoria del RSX
+ * cambió; con `repair`, los vuelve a copiar. */
+int rsxkit_fp_verify(int repair);
+/* Vacía la caché de programas generados: se generan y suben de nuevo. */
+void rsxkit_fp_flush(void);
 /* Programas generados (fpcache.c): el de una descripción, generado y
  * subido la primera vez; NULL si no es válida o no hay memoria. `hdr` y
  * `offset` son lo que pide rsxLoadFragmentProgramLocation. */

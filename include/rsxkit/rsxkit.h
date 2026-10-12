@@ -20,6 +20,7 @@
 #ifndef RSXKIT_RSXKIT_H
 #define RSXKIT_RSXKIT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "rsxkit/fpgen.h"
@@ -72,11 +73,35 @@ const rsxkit_screen *rsxkit_screen_info(void);
 
 /* ---- Cuadro -------------------------------------------------------------- */
 
-/* Empieza a dibujar en el búfer trasero y lo limpia con un color 0xRRGGBB. */
+/* Empieza a dibujar en el búfer trasero y lo limpia con un color 0xRRGGBB.
+ * Si el flip anterior no ocurrió, lo espera (en el PPE: el RSX nunca queda
+ * parado esperando un flip). Si la aplicación va más rápido que la tele, la
+ * frena aquí. */
 void rsxkit_frame_begin(uint32_t clear_rgb);
-/* Programa el flip en el próximo vsync. Solo bloquea si el flip anterior no
- * ha ocurrido: si la aplicación va más rápido que la tele, la frena. */
+/* Programa el flip en el próximo vsync y vuelve (solo espera si quedaba otro
+ * en vuelo sin rsxkit_frame_begin en medio). Después del flip, rsxkit no da
+ * por puesto nada del estado del RSX: en la PS3 el sistema dibuja su menú en
+ * los flips de la aplicación y lo pisa. */
 void rsxkit_frame_end(void);
+/* true si rsxkit_frame_end no va a esperar: no hay flip en vuelo o ya
+ * ocurrió. No bloquea. Sirve cuando el sistema retiene los flips (en la
+ * PS3, mientras dibuja su menú encima de la aplicación): presentar solo si
+ * es true, para no quedarse esperando. */
+bool rsxkit_frame_ready(void);
+/* Vblanks desde el arranque (gcmGetVBlankCount), para diagnosticar flips
+ * lentos. */
+uint64_t rsxkit_vblank_count(void);
+/* Después de que el sistema dibujó encima de la aplicación (en la PS3, su
+ * menú): olvida el estado del RSX que rsxkit daba por puesto (programas,
+ * constantes del vertex program, arreglos de vértices, superficie, modo de
+ * flip) para mandarlo todo de nuevo en el próximo dibujo: el sistema pisa
+ * al menos las constantes. Revisa también los programas precompilados en la
+ * memoria del RSX; devuelve cuántos encontró cambiados (los restaura y
+ * vacía la caché de programas generados). */
+int rsxkit_after_system(void);
+/* Mapeos de rsxkit_map_main que ya no dan la misma dirección y el mismo
+ * offset (diagnóstico). */
+int rsxkit_main_maps_bad(void);
 /* Espera a que el RSX termine todo lo enviado. */
 void rsxkit_finish(void);
 /* Búfer de color en que se está dibujando (X8R8G8B8), para pruebas: leerlo

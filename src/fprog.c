@@ -47,6 +47,33 @@ static void fix_perspective(u32 *ucode, u32 size)
 	}
 }
 
+/* Los programas subidos, con una suma de su copia en la memoria del RSX,
+ * para ver si alguien la pisó (rsxkit_fp_verify). */
+#define FP_TRACKED 16
+static struct {
+	rsxFragmentProgram *fp;
+	u32 *buf;
+	u32 size, sum;
+} tracked[FP_TRACKED];
+static unsigned ntracked;
+
+static u32 checksum(const volatile u32 *p, u32 size)
+{
+	u32 s = 0x811C9DC5u;
+	for (u32 i = 0; i < size / 4; i++)
+		s = (s ^ p[i]) * 16777619u;
+	return s;
+}
+
+static void copy_program(rsxFragmentProgram *fp, void *buf)
+{
+	void *ucode;
+	u32 size;
+	rsxFragmentProgramGetUCode(fp, &ucode, &size);
+	memcpy(buf, ucode, size);
+	fix_perspective(buf, size);
+}
+
 void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset)
 {
 	void *ucode;
@@ -55,8 +82,27 @@ void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset)
 	void *buf = rsxMemalign(64, size);
 	if (!buf)
 		return NULL;
-	memcpy(buf, ucode, size);
-	fix_perspective(buf, size);
+	copy_program(fp, buf);
 	rsxAddressToOffset(buf, offset);
+	if (ntracked < FP_TRACKED) {
+		tracked[ntracked].fp = fp;
+		tracked[ntracked].buf = buf;
+		tracked[ntracked].size = size;
+		tracked[ntracked].sum = checksum(buf, size);
+		ntracked++;
+	}
 	return buf;
+}
+
+int rsxkit_fp_verify(int repair)
+{
+	int bad = 0;
+	for (unsigned i = 0; i < ntracked; i++) {
+		if (checksum(tracked[i].buf, tracked[i].size) == tracked[i].sum)
+			continue;
+		bad++;
+		if (repair)
+			copy_program(tracked[i].fp, tracked[i].buf);
+	}
+	return bad;
 }

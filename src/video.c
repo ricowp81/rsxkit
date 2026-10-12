@@ -23,6 +23,27 @@ static const int32_t default_modes[] = {
 	VIDEO_RESOLUTION_720, VIDEO_RESOLUTION_1080, VIDEO_RESOLUTION_480, VIDEO_RESOLUTION_576,
 };
 
+/* Espera en el PPE a que ocurra el flip en vuelo: hasta entonces, el búfer
+ * que se va a dibujar es el que está en pantalla. Antes era un
+ * gcmSetWaitFlip en el búfer de comandos, pero con el RSX parado en esa
+ * espera el sistema de la PS3 no dibujaba su menú encima a tiempo y cada
+ * flip tardaba segundos (también después de cerrarlo). `max_us` 0: sin
+ * límite. Devuelve false si se acabó el tiempo. */
+static bool wait_flip(uint64_t max_us)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	if (!g->flip_pending)
+		return true;
+	uint64_t t0 = sysGetSystemTime();
+	while (gcmGetFlipStatus() != 0) {
+		if (max_us && sysGetSystemTime() - t0 > max_us)
+			return false;
+		sysUsleep(200);
+	}
+	g->flip_pending = 0;
+	return true;
+}
+
 void rsxkit_wait_label(uint8_t index, uint32_t value)
 {
 	volatile uint32_t *label = gcmGetLabelAddress(index);
@@ -194,7 +215,7 @@ void rsxkit_shutdown(void)
 	struct rsxkit_state *g = &rsxkit_g;
 	if (!g->ctx)
 		return;
-	gcmSetWaitFlip(g->ctx);
+	wait_flip(1000000);  /* con el sistema encima puede no llegar: no esperarlo para siempre */
 	rsxFinish(g->ctx, 1);
 	rsxkit_fb_shutdown();
 	rsxkit_3d_shutdown();
@@ -218,9 +239,7 @@ int rsxkit_video_reconfigure(const rsxkit_config *cfg)
 
 	/* Que el RSX no esté usando nada de lo que se libera: ni el flip en
 	 * vuelo ni los comandos pendientes. */
-	if (g->flip_pending)
-		while (gcmGetFlipStatus() != 0)
-			sysUsleep(200);
+	wait_flip(0);
 	rsxkit_finish();
 
 	int rc = set_mode(id, &res);
@@ -311,6 +330,7 @@ void rsxkit_set_2d_state(void)
 void rsxkit_frame_begin(uint32_t clear_rgb)
 {
 	struct rsxkit_state *g = &rsxkit_g;
+	wait_flip(0);  /* el búfer de ahora estuvo en pantalla hasta el flip en vuelo */
 	rsxkit_reserve(256);
 	rsxkit_bind_screen();
 	rsxSetClearColor(g->ctx, clear_rgb & 0x00FFFFFFu);
@@ -319,22 +339,54 @@ void rsxkit_frame_begin(uint32_t clear_rgb)
 				      GCM_CLEAR_S | GCM_CLEAR_Z);
 }
 
+bool rsxkit_frame_ready(void)
+{
+	return !rsxkit_g.flip_pending || gcmGetFlipStatus() == 0;
+}
+
 void rsxkit_frame_end(void)
 {
 	struct rsxkit_state *g = &rsxkit_g;
-	/* Un flip en vuelo como máximo: el búfer que se va a reutilizar es el
-	 * que estaba en pantalla antes del último flip. */
-	if (g->flip_pending) {
-		while (gcmGetFlipStatus() != 0)
-			sysUsleep(200);
-	}
+	/* Un flip en vuelo como máximo (por si no hubo rsxkit_frame_begin). El
+	 * RSX no espera el flip: lo que se le mande después no toca la
+	 * pantalla hasta el próximo rsxkit_frame_begin, que espera en el PPE. */
+	wait_flip(0);
 	gcmResetFlipStatus();
 	rsxkit_reserve(64);
 	gcmSetFlip(g->ctx, g->cur);
 	rsxFlushBuffer(g->ctx);
-	gcmSetWaitFlip(g->ctx);
 	g->flip_pending = 1;
 	g->cur ^= 1;
+	/* En la PS3 el sistema dibuja su menú (y sus avisos) en los flips de la
+	 * aplicación y pisa estado del RSX: programas, constantes, arreglos.
+	 * Nada de lo puesto antes del flip se da por bueno después (unos
+	 * cientos de bytes por cuadro). Sin esto, con su menú encima y un rato
+	 * después de cerrarlo, todo lo dibujado salía negro. */
+	rsxkit_forget_state();
+}
+
+uint64_t rsxkit_vblank_count(void)
+{
+	return gcmGetVBlankCount();
+}
+
+int rsxkit_after_system(void)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	if (!g->ctx)
+		return 0;
+	int bad = rsxkit_fp_verify(1);
+	if (bad)
+		rsxkit_fp_flush();
+	/* Lo que rsxkit da por puesto, de nuevo en el próximo dibujo (también
+	 * se olvida en cada flip: el sistema sigue pisándolo un rato después de
+	 * avisar que terminó). */
+	rsxkit_forget_state();
+	rsxkit_reserve(16);
+	rsxInvalidateVertexCache(g->ctx);
+	rsxInvalidateTextureCache(g->ctx, GCM_INVALIDATE_TEXTURE);
+	gcmSetFlipMode(GCM_FLIP_VSYNC);
+	return bad;
 }
 
 const uint32_t *rsxkit_back_buffer(uint32_t *pitch_bytes)

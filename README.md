@@ -68,8 +68,11 @@ después de `rsxkit_init` y `rsxkit_fb_create`.
 
 | Función | Qué hace |
 |---|---|
-| `void rsxkit_frame_begin(uint32_t clear_rgb)` | Empieza el cuadro en el búfer trasero y lo limpia con `0xRRGGBB`. |
-| `void rsxkit_frame_end(void)` | Programa el flip para el siguiente vsync. Hay como máximo un flip en vuelo: si la aplicación produce cuadros más rápido que la tele, aquí espera; si va más lenta, no espera nunca. |
+| `void rsxkit_frame_begin(uint32_t clear_rgb)` | Empieza el cuadro en el búfer trasero y lo limpia con `0xRRGGBB`. Hay como máximo un flip en vuelo: si el anterior no ocurrió, aquí espera, en el PPE (si la aplicación produce cuadros más rápido que la tele, la frena aquí; si va más lenta, no espera nunca). El RSX no queda parado esperando el flip (sin `gcmSetWaitFlip`): con el RSX en esa espera, el sistema de la PS3 tardaba segundos en dibujar su menú encima. |
+| `void rsxkit_frame_end(void)` | Programa el flip para el siguiente vsync y vuelve sin esperar. |
+| `uint64_t rsxkit_vblank_count(void)` | Vblanks desde el arranque, para diagnosticar flips lentos. |
+| `int rsxkit_after_system(void)` | Después de que el sistema dibujó encima (el menú del botón PS): olvida el estado del RSX que rsxkit daba por puesto para mandarlo de nuevo, y revisa los programas precompilados en la memoria del RSX; devuelve cuántos estaban cambiados (los restaura). |
+| `bool rsxkit_frame_ready(void)` | `true` si `rsxkit_frame_end` no va a esperar (ningún flip en vuelo, o ya ocurrió). No bloquea. En la PS3, mientras el sistema dibuja su menú encima de la aplicación, los flips tardan segundos en completarse: presentar solo cuando da `true` para no dejar de atender los eventos del sistema. |
 | `void rsxkit_finish(void)` | Espera a que el RSX termine todo lo enviado. |
 | `const uint32_t *rsxkit_back_buffer(uint32_t *pitch)` | Búfer de color del cuadro en curso (X8R8G8B8), para pruebas automáticas. Llamar después de `rsxkit_finish`. Leer la memoria del RSX desde el PPE es muy lento. |
 
