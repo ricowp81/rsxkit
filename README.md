@@ -178,8 +178,10 @@ rsxkit_draw_triangles(&d, first, count);
 - **Términos con programa generado** (`nterms > 0`): ver «Generador de
   fragment programs» más abajo.
 - **Texturas** (`rsxkit_texture`): lineales, en memoria local o principal,
-  con los formatos de `rsxkit_format`, repetición/espejo/límite, filtro y
-  la transformación `u = s·xf[0] + xf[2]`, `v = t·xf[1] + xf[3]`.
+  con los formatos de `rsxkit_format`, repetición, espejo, límite o espejo
+  una sola vez (`RSXKIT_WRAP_MIRROR_ONCE`: u en [−1, 0] es el reflejo de
+  [0, 1] y fuera de [−1, 1] se fija el borde), filtro y la transformación
+  `u = s·xf[0] + xf[2]`, `v = t·xf[1] + xf[3]`.
 - **Estado**: mezcla (opaca, alfa, aditiva, sin color), profundidad (prueba
   LEQUAL, escritura, desplazamiento para calcomanías), recorte de caras
   (frente = antihorario con la y hacia arriba), prueba de alfa, tijeras

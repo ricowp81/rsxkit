@@ -242,7 +242,10 @@ typedef struct rsxkit_vertex {
 } rsxkit_vertex;
 
 enum { RSXKIT_MEM_LOCAL = 0, RSXKIT_MEM_MAIN = 1 };
-enum { RSXKIT_WRAP_CLAMP = 0, RSXKIT_WRAP_REPEAT = 1, RSXKIT_WRAP_MIRROR = 2 };
+/* RSXKIT_WRAP_MIRROR_ONCE: la coordenada se refleja una vez alrededor de 0
+ * (u en [−1, 0] es el espejo de [0, 1]) y fuera de [−1, 1] se fija el borde
+ * (MIRROR_ONCE_CLAMP_TO_EDGE del RSX). */
+enum { RSXKIT_WRAP_CLAMP = 0, RSXKIT_WRAP_REPEAT = 1, RSXKIT_WRAP_MIRROR = 2, RSXKIT_WRAP_MIRROR_ONCE = 3 };
 
 /* Textura lineal (pitch múltiplo de 64, offset alineado a 128). Las
  * coordenadas del vértice se llevan a la textura con
