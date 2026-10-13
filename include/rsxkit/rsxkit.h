@@ -283,6 +283,7 @@ typedef enum rsxkit_cull {
  * que dos dibujos con la misma z dan la misma en cada píxel y la prueba
  * LEQUAL deja pasar al último (orden de pintor con z-buffer). */
 #define RSXKIT_DEPTH_CONST  0x8u
+#define RSXKIT_DEPTH_LESS   0x10u /* la prueba es < en vez de ≤ (con la misma z no pasa) */
 
 /* Lo que evalúa el RSX por píxel, con
  *   X_j = k[j][0] + k[j][1]·C + k[j][2]·C.aaaa    (C = color del vértice)

@@ -13,7 +13,7 @@
  * mandar cientos de dibujos por cuadro sin llenar el búfer de comandos de
  * estado repetido.
  *
- * Profundidad: z/w en [0, 1] con LEQUAL; sin recorte por los planos
+ * Profundidad: z/w en [0, 1] con LEQUAL (LESS con RSXKIT_DEPTH_LESS); sin recorte por los planos
  * cercano y lejano (la z se satura), como hacen los microcódigos de N64
  * sin recorte cercano. El recorte por w > 0 lo sigue haciendo el RSX. Con
  * RSXKIT_DEPTH_CONST el viewport lleva la z de todo vértice a la del
@@ -215,6 +215,7 @@ static void set_depth(uint8_t depth)
 	rsxSetDepthTestEnable(ctx, (depth & RSXKIT_DEPTH_TEST) ? GCM_TRUE : GCM_FALSE);
 	rsxSetDepthWriteEnable(ctx, (depth & RSXKIT_DEPTH_WRITE) ? GCM_TRUE : GCM_FALSE);
 	rsxSetPolygonOffsetFillEnable(ctx, (depth & RSXKIT_DEPTH_OFFSET) ? GCM_TRUE : GCM_FALSE);
+	rsxSetDepthFunc(ctx, (depth & RSXKIT_DEPTH_LESS) ? GCM_LESS : GCM_LEQUAL);
 }
 
 /* z < 0: la de los vértices (el viewport que puso rsxkit_bind). */
