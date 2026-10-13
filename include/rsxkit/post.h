@@ -174,6 +174,24 @@ int rsxkit_post_reduce_passes(int passes);
  * hay. */
 bool rsxkit_fb_texture(const rsxkit_fb *fb, rsxkit_texture *out);
 
+/* ---- Etiquetas: el RSX con un SPE o la CPU ----------------------------------------- */
+
+/* Etiquetas del RSX que rsxkit no usa, para coordinarlo con otros: un SPE
+ * espera a que el RSX deje algo en la memoria principal y el RSX espera a
+ * que el SPE deje su resultado. */
+#define RSXKIT_LABEL_USER_MIN 200
+#define RSXKIT_LABEL_USER_MAX 239
+/* En el búfer de comandos: cuando termine lo dibujado antes, el RSX escribe
+ * `value` en la etiqueta `index`. Manda lo encolado al RSX. */
+void rsxkit_post_label_write(uint32_t index, uint32_t value);
+/* En el búfer de comandos: el RSX no sigue hasta que la etiqueta `index`
+ * valga `value`. Si nadie la escribe se queda ahí: quien la pide debe
+ * asegurarse de que se escriba (o escribirla desde la CPU para soltarlo). */
+void rsxkit_post_label_wait(uint32_t index, uint32_t value);
+/* La etiqueta en la memoria principal: la CPU la lee y la escribe; un SPE,
+ * por DMA a esta dirección (16 bytes por etiqueta). */
+volatile uint32_t *rsxkit_label_address(uint32_t index);
+
 /* ---- Medición ---------------------------------------------------------------------- */
 
 /* Marcas de tiempo del RSX: el RSX escribe su reloj, en ns, en la marca `i`

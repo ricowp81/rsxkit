@@ -617,6 +617,27 @@ int rsxkit_post_reduce(const rsxkit_texture *src, const rsxkit_rect *region, uin
 	return rsxkit_post_run(&p);
 }
 
+/* ---- Etiquetas ---------------------------------------------------------------------- */
+
+void rsxkit_post_label_write(uint32_t index, uint32_t value)
+{
+	gcmContextData *ctx = rsxkit_g.ctx;
+	rsxkit_reserve(16);
+	rsxSetWriteBackendLabel(ctx, (u8)index, value);
+	rsxFlushBuffer(ctx);
+}
+
+void rsxkit_post_label_wait(uint32_t index, uint32_t value)
+{
+	rsxkit_reserve(16);
+	rsxSetWaitLabel(rsxkit_g.ctx, (u8)index, value);
+}
+
+volatile uint32_t *rsxkit_label_address(uint32_t index)
+{
+	return (volatile uint32_t *)gcmGetLabelAddress((u8)index);
+}
+
 /* ---- Marcas de tiempo ------------------------------------------------------------ */
 
 /* Un reporte del RSX (método 0x1800, GET_REPORT): escribe en la entrada
