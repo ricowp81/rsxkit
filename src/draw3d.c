@@ -13,6 +13,10 @@
  * mandar cientos de dibujos por cuadro sin llenar el búfer de comandos de
  * estado repetido.
  *
+ * Con rsxkit_vertices_prev, el mismo vertex program con un arreglo más de
+ * posiciones (rsxkit_lincomb_lerp.vcg): cada vértice va en prev + (pos −
+ * prev)·t, para dibujar un cuadro intermedio entre dos con la misma lista.
+ *
  * Profundidad: z/w en [0, 1] con LEQUAL (LESS con RSXKIT_DEPTH_LESS); sin recorte por los planos
  * cercano y lejano (la z se satura), como hacen los microcódigos de N64
  * sin recorte cercano. El recorte por w > 0 lo sigue haciendo el RSX. Con
@@ -26,6 +30,7 @@
 #include "internal.h"
 
 extern const u8 rsxkit_lincomb_vpo[];
+extern const u8 rsxkit_lincomb_lerp_vpo[];
 extern const u8 rsxkit_lincomb0_fpo[];
 extern const u8 rsxkit_lincomb1_fpo[];
 extern const u8 rsxkit_lincomb2_fpo[];
@@ -42,25 +47,39 @@ struct tex_state {
 	rsxkit_texture t;
 };
 
+/* Un vertex program y sus constantes (el interpolado agrega «lerp»). */
+struct vprog {
+	rsxVertexProgram *vp;
+	void *ucode;
+	u32 const_start;
+	rsxProgramConst *consts[NCONST];
+	rsxProgramConst *lerp;
+	int block;  /* constantes consecutivas: se suben de una vez */
+};
+
 static struct {
 	int ready;
-	rsxVertexProgram *vp;
-	void *vp_ucode;
+	struct vprog prog[2];   /* 0: el de siempre; 1: con posiciones interpoladas */
 	rsxFragmentProgram *fp[3];
 	u32 fp_offset[3];
 	const void *cur_fp;     /* programa cargado (g->fp_3d >= 0): precompilado o de la caché */
 	uint32_t cur_fp_gen;    /* generación de la caché cuando se cargó */
-	u32 const_start;
-	rsxProgramConst *consts[NCONST];
-	int block;  /* constantes consecutivas: se suben de una vez */
 	float c[NCONST][4];
 	int c_valid;
+	float lerp_t;           /* la de la constante «lerp» subida, si lerp_valid */
+	int lerp_valid;
 	/* Estado puesto. */
 	uint8_t blend, cull, depth, alpha_ref;
 	struct tex_state tex[2];
 	uint32_t vb_offset;
 	uint8_t vb_location;
 	int vb_set;
+	/* rsxkit_vertices_prev: posiciones de antes y la fracción. */
+	uint32_t prev_offset;
+	uint8_t prev_location;
+	int prev_set;
+	int prev_bound;         /* TEXCOORD1 ligado (si no, nunca se tocó: sin comandos de más) */
+	float t;
 } d3;
 
 static const char *const const_names[NCONST] = {
@@ -69,22 +88,31 @@ static const char *const const_names[NCONST] = {
 	"k[19]", "k[20]", "fog", "fogsel[0]", "fogsel[1]",
 };
 
+static int vprog_init(struct vprog *p, const u8 *vpo, int lerp)
+{
+	u32 size;
+	p->vp = (rsxVertexProgram *)vpo;
+	rsxVertexProgramGetUCode(p->vp, &p->ucode, &size);
+	p->const_start = p->vp->const_start;
+	p->block = 1;
+	for (int i = 0; i < NCONST; i++) {
+		p->consts[i] = rsxVertexProgramGetConst(p->vp, const_names[i]);
+		if (!p->consts[i])
+			return RSXKIT_EINIT;
+		if (p->consts[i]->index != p->consts[0]->index + (u32)i)
+			p->block = 0;
+	}
+	p->lerp = lerp ? rsxVertexProgramGetConst(p->vp, "lerp") : NULL;
+	return lerp && !p->lerp ? RSXKIT_EINIT : RSXKIT_OK;
+}
+
 static int init_3d(void)
 {
 	if (d3.ready)
 		return RSXKIT_OK;
-	u32 size;
-	d3.vp = (rsxVertexProgram *)rsxkit_lincomb_vpo;
-	rsxVertexProgramGetUCode(d3.vp, &d3.vp_ucode, &size);
-	d3.const_start = d3.vp->const_start;
-	d3.block = 1;
-	for (int i = 0; i < NCONST; i++) {
-		d3.consts[i] = rsxVertexProgramGetConst(d3.vp, const_names[i]);
-		if (!d3.consts[i])
-			return RSXKIT_EINIT;
-		if (d3.consts[i]->index != d3.consts[0]->index + (u32)i)
-			d3.block = 0;
-	}
+	if (vprog_init(&d3.prog[0], rsxkit_lincomb_vpo, 0) != RSXKIT_OK ||
+	    vprog_init(&d3.prog[1], rsxkit_lincomb_lerp_vpo, 1) != RSXKIT_OK)
+		return RSXKIT_EINIT;
 	const u8 *fps[3] = { rsxkit_lincomb0_fpo, rsxkit_lincomb1_fpo, rsxkit_lincomb2_fpo };
 	for (int i = 0; i < 3; i++) {
 		d3.fp[i] = (rsxFragmentProgram *)fps[i];
@@ -108,6 +136,7 @@ void rsxkit_forget_state(void)
 	for (int i = 0; i < 16; i++)
 		rsxBindVertexArrayAttrib(g->ctx, i, 0, 0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 	g->arrays_bound = 0;
+	d3.prev_bound = 0;
 	rsxkit_leave_3d();
 	g->screen_bound = 0;
 	rsxkit_bound.target = NULL;
@@ -123,6 +152,7 @@ void rsxkit_leave_3d(void)
 		for (int i = 0; i < 16; i++)
 			rsxBindVertexArrayAttrib(g->ctx, i, 0, 0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 		g->arrays_bound = 0;
+		d3.prev_bound = 0;
 	}
 	g->prog_3d = 0;
 	g->fp_3d = -1;
@@ -136,12 +166,23 @@ void rsxkit_vertices(uint32_t offset, uint8_t location)
 	d3.vb_offset = offset;
 	d3.vb_location = location;
 	d3.vb_set = 1;
+	d3.prev_set = 0;
 	g->arrays_bound = 0;  /* se vuelven a ligar en el próximo dibujo */
 	rsxkit_reserve(32);
 	/* Lo que hay en memoria cambió: vértices y texturas nuevas. */
 	rsxInvalidateVertexCache(g->ctx);
 	rsxInvalidateTextureCache(g->ctx, GCM_INVALIDATE_TEXTURE);
 	d3.tex[0].valid = d3.tex[1].valid = 0;
+}
+
+void rsxkit_vertices_prev(uint32_t offset, uint8_t location, float t)
+{
+	if (!d3.prev_set || d3.prev_offset != offset || d3.prev_location != location)
+		rsxkit_g.arrays_bound = 0;
+	d3.prev_offset = offset;
+	d3.prev_location = location;
+	d3.prev_set = 1;
+	d3.t = t;
 }
 
 static void bind_arrays(void)
@@ -153,6 +194,16 @@ static void bind_arrays(void)
 	rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_POS, 0, o + 0, stride, 4, GCM_VERTEX_DATA_TYPE_F32, loc);
 	rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_TEX0, 0, o + 16, stride, 2, GCM_VERTEX_DATA_TYPE_F32, loc);
 	rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_COLOR0, 0, o + 24, stride, 4, GCM_VERTEX_DATA_TYPE_U8, loc);
+	if (d3.prev_set) {
+		u8 ploc = d3.prev_location == RSXKIT_MEM_MAIN ? GCM_LOCATION_CELL : GCM_LOCATION_RSX;
+		rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_TEX1, 0, d3.prev_offset, 16, 4,
+					 GCM_VERTEX_DATA_TYPE_F32, ploc);
+		d3.prev_bound = 1;
+	} else if (d3.prev_bound) {
+		rsxBindVertexArrayAttrib(g->ctx, GCM_VERTEX_ATTRIB_TEX1, 0, 0, 0, 0, GCM_VERTEX_DATA_TYPE_F32,
+					 GCM_LOCATION_RSX);
+		d3.prev_bound = 0;
+	}
 	g->arrays_bound = 1;
 }
 
@@ -338,9 +389,15 @@ static void set_texture(int unit, const rsxkit_texture *t)
 			   GCM_TEXTURE_ZFUNC_LESS, 0);
 }
 
-static void set_constants(const rsxkit_draw *d)
+static void set_constants(const rsxkit_draw *d, const struct vprog *p)
 {
 	gcmContextData *ctx = rsxkit_g.ctx;
+	if (p->lerp && (!d3.lerp_valid || d3.lerp_t != d3.t)) {
+		const float l[4] = { d3.t, 0.0f, 0.0f, 0.0f };
+		rsxLoadVertexProgramParameterBlock(ctx, p->const_start + p->lerp->index, 1, l);
+		d3.lerp_t = d3.t;
+		d3.lerp_valid = 1;
+	}
 	float c[NCONST][4];
 	memset(c, 0, sizeof c);
 	c[0][0] = 2.0f / rsxkit_bound.lw;
@@ -368,13 +425,13 @@ static void set_constants(const rsxkit_draw *d)
 		return;
 	memcpy(d3.c, c, sizeof c);
 	d3.c_valid = 1;
-	if (d3.block) {
+	if (p->block) {
 		/* No rsxSetVertexProgramConstants: en PSL1GHT f649a08 avanza el
 		 * búfer de comandos dos veces (docs/rsx-notes.md). */
-		rsxLoadVertexProgramParameterBlock(ctx, d3.const_start + d3.consts[0]->index, NCONST, &c[0][0]);
+		rsxLoadVertexProgramParameterBlock(ctx, p->const_start + p->consts[0]->index, NCONST, &c[0][0]);
 	} else {
 		for (int i = 0; i < NCONST; i++)
-			rsxSetVertexProgramParameter(ctx, d3.vp, d3.consts[i], c[i]);
+			rsxSetVertexProgramParameter(ctx, p->vp, p->consts[i], c[i]);
 	}
 }
 
@@ -389,10 +446,14 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
 	if (!g->state_valid)
 		fixed_state();
-	if (!g->prog_3d) {
-		rsxLoadVertexProgram(ctx, d3.vp, d3.vp_ucode);
-		g->prog_3d = 1;
+	/* prog_3d: 1 el de siempre, 2 el interpolado (las constantes de uno
+	 * no valen para el otro). */
+	const struct vprog *vp = &d3.prog[d3.prev_set];
+	if (g->prog_3d != 1 + d3.prev_set) {
+		rsxLoadVertexProgram(ctx, vp->vp, vp->ucode);
+		g->prog_3d = 1 + d3.prev_set;
 		d3.c_valid = 0;
+		d3.lerp_valid = 0;
 	}
 	/* Programa: precompilado por número de texturas, o generado para los
 	 * términos del dibujo (y cacheado). */
@@ -432,6 +493,6 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	set_alpha(d->alpha_ref);
 	for (int i = 0; i < ntex; i++)
 		set_texture(i, &d->tex[i]);
-	set_constants(d);
+	set_constants(d, vp);
 	rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, first, count);
 }

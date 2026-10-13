@@ -334,6 +334,11 @@ void rsxkit_fp_get_stats(rsxkit_fp_stats *out);
 
 /* Arreglo de rsxkit_vertex que usan los dibujos siguientes. */
 void rsxkit_vertices(uint32_t offset, uint8_t location);
+/* Cuadros intermedios: un arreglo de posiciones de antes (un float[4] por
+ * vértice, en el mismo orden que el de rsxkit_vertices) y la fracción t; los
+ * dibujos siguientes ponen cada vértice en prev + (pos − prev)·t (t = 1: donde
+ * está). Hasta el próximo rsxkit_vertices, que lo apaga. */
+void rsxkit_vertices_prev(uint32_t offset, uint8_t location, float t);
 /* Triángulos sueltos: vértices first .. first + count − 1 del arreglo. */
 void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count);
 
