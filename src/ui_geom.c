@@ -36,15 +36,17 @@ static struct {
 	uint32_t dropped;
 	float white_s, white_t;  /* centro del bloque blanco */
 	uint32_t group[RSXKIT_UI_MAX_GROUPS], ngroups;
+	uint8_t group_img[RSXKIT_UI_MAX_GROUPS];  /* 0: atlas; n: ranura n − 1 */
+	uint32_t img_w[RSXKIT_UI_IMAGES], img_h[RSXKIT_UI_IMAGES];
 } b;
 
 /* Lo que sigue es otro grupo (otra llamada al RSX). */
 static void new_group(void)
 {
-	if (b.ngroups && b.group[b.ngroups - 1] == b.n)
-		return;
-	if (b.ngroups < RSXKIT_UI_MAX_GROUPS)
+	if (!(b.ngroups && b.group[b.ngroups - 1] == b.n) && b.ngroups < RSXKIT_UI_MAX_GROUPS)
 		b.group[b.ngroups++] = b.n;
+	if (b.ngroups)
+		b.group_img[b.ngroups - 1] = 0;  /* un grupo reusado vuelve a ser del atlas */
 }
 
 static void cell_origin(int index, uint32_t *x, uint32_t *y)
@@ -104,6 +106,7 @@ void rsxkit_ui_batch(rsxkit_vertex *v, uint32_t cap, float lw, float lh)
 	b.cap = v ? cap : 0;
 	b.n = 0;
 	b.group[0] = 0;
+	b.group_img[0] = 0;
 	b.ngroups = 1;
 	b.lw = lw;
 	b.lh = lh;
@@ -131,6 +134,19 @@ uint32_t rsxkit_ui_groups(const uint32_t **first)
 uint32_t rsxkit_ui_dropped(void)
 {
 	return b.dropped;
+}
+
+void rsxkit_ui_image_size(int slot, uint32_t w, uint32_t h)
+{
+	if (slot >= 0 && slot < RSXKIT_UI_IMAGES) {
+		b.img_w[slot] = w;
+		b.img_h[slot] = h;
+	}
+}
+
+uint32_t rsxkit_ui_group_image(uint32_t g)
+{
+	return g < b.ngroups ? b.group_img[g] : 0;
 }
 
 static void vertex(rsxkit_vertex *v, float x, float y, float s, float t, uint32_t rgba)
@@ -175,6 +191,24 @@ void rsxkit_ui_gradient(float x, float y, float w, float h, uint32_t tl, uint32_
 	const uint32_t c[4] = { tl, tr, bl, br };
 	new_group();
 	quad(p, st, c);
+}
+
+void rsxkit_ui_image(int slot, float x, float y, float w, float h, uint32_t rgba)
+{
+	if (slot < 0 || slot >= RSXKIT_UI_IMAGES || !b.img_w[slot] || !b.img_h[slot] || w <= 0.0f || h <= 0.0f ||
+	    !(rgba & 0xFF))
+		return;
+	if (b.ngroups + 1 >= RSXKIT_UI_MAX_GROUPS) {  /* el último grupo no puede quedar de imagen */
+		b.dropped++;
+		return;
+	}
+	const float iw = (float)b.img_w[slot], ih = (float)b.img_h[slot];
+	const float p[4][2] = { { x, y }, { x + w, y }, { x, y + h }, { x + w, y + h } };
+	const float st[4][2] = { { 0.0f, 0.0f }, { iw, 0.0f }, { 0.0f, ih }, { iw, ih } };
+	const uint32_t c[4] = { rgba, rgba, rgba, rgba };
+	new_group();
+	b.group_img[b.ngroups - 1] = (uint8_t)(slot + 1);
+	quad(p, st, c);  /* lo que siga abre su propio grupo (new_group) */
 }
 
 float rsxkit_ui_text(float x, float y, const char *utf8, float scale, uint32_t rgba, uint32_t max_cells)

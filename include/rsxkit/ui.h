@@ -43,6 +43,9 @@ extern "C" {
 #endif
 
 #define RSXKIT_UI_MAX_QUADS  4096
+#define RSXKIT_UI_IMAGES      1    /* ranuras de imagen (carátulas) */
+#define RSXKIT_UI_IMAGE_MAX_W 320  /* tamaño máximo de una imagen subida */
+#define RSXKIT_UI_IMAGE_MAX_H 448
 #define RSXKIT_UI_MAX_GROUPS 1024  /* llamadas al RSX por cuadro; las de más van juntas */
 
 /* Una onda: una cresta hecha de dos senos, con una línea brillante encima y
@@ -85,6 +88,15 @@ float rsxkit_ui_text(float x, float y, const char *utf8, float scale, uint32_t r
 /* La onda en el instante t (segundos), a lo ancho del espacio lógico. */
 void rsxkit_ui_wave(const rsxkit_wave *w, float t);
 
+/* Imágenes (carátulas): rsxkit_ui_image_set sube una imagen RGBA8888 (bytes
+ * R, G, B, A; w × h de hasta RSXKIT_UI_IMAGE_MAX_W × _H) a la ranura y
+ * espera a que el RSX termine los cuadros que la usan, así que se llama
+ * entre cuadros y rara vez. rsxkit_ui_image la dibuja estirada al
+ * rectángulo (x, y, w, h); `rgba` la tiñe y le pone alfa (0xFFFFFFFF = tal
+ * cual, 0xFFFFFF80 = a media opacidad). Devuelve 0 o un código de rsxkit. */
+int rsxkit_ui_image_set(int slot, const uint8_t *rgba, uint32_t w, uint32_t h);
+void rsxkit_ui_image(int slot, float x, float y, float w, float h, uint32_t rgba);
+
 /* Quads descartados desde el arranque (no cupieron en un cuadro). */
 uint32_t rsxkit_ui_dropped(void);
 
@@ -97,6 +109,12 @@ uint32_t rsxkit_ui_dropped(void);
 #define RSXKIT_UI_ATLAS_W 288
 #define RSXKIT_UI_ATLAS_H 392
 void rsxkit_ui_atlas(uint8_t *rgba, uint32_t pitch);
+/* Sin RSX: el tamaño de la imagen de una ranura (lo que rsxkit_ui_image_set
+ * avisa al subirla); sus coordenadas de textura van en téxeles de esa imagen. */
+void rsxkit_ui_image_size(int slot, uint32_t w, uint32_t h);
+/* De qué ranura es el grupo `g` de rsxkit_ui_groups: 0 es el atlas de la
+ * fuente (rectángulos, texto, ondas) y n > 0 la ranura n − 1. */
+uint32_t rsxkit_ui_group_image(uint32_t g);
 /* Lo que dibujen rsxkit_ui_gradient, _text y _wave va a `v` (hasta `cap`
  * vértices, triángulos sueltos) en un espacio lógico de lw × lh, en vez de
  * al lote del RSX. Con v NULL no se acepta nada. */

@@ -12,13 +12,18 @@
 #include "internal.h"
 #include "rsxkit/ui.h"
 
-#define UI_BYTES     (2u << 20)
+#define UI_BYTES     (3u << 20)
 #define ATLAS_PITCH  (RSXKIT_UI_ATLAS_W * 4)
 #define ATLAS_BYTES  ((ATLAS_PITCH * RSXKIT_UI_ATLAS_H + 0xFFFFu) & ~0xFFFFu)
 #define VB_CAP       (RSXKIT_UI_MAX_QUADS * 6)
 #define VB_BYTES     (VB_CAP * (uint32_t)sizeof(rsxkit_vertex))
+/* Una ranura de imagen: pitch fijo de 320 píxeles (múltiplo de 64 bytes). */
+#define IMG_PITCH    (RSXKIT_UI_IMAGE_MAX_W * 4)
+#define IMG_BYTES    ((IMG_PITCH * RSXKIT_UI_IMAGE_MAX_H + 0xFFFFu) & ~0xFFFFu)
+#define IMG_BASE     (ATLAS_BYTES + 2 * VB_BYTES)
 
-_Static_assert(ATLAS_BYTES + 2 * VB_BYTES <= UI_BYTES, "la memoria del 2D no alcanza");
+_Static_assert(IMG_BASE + RSXKIT_UI_IMAGES * IMG_BYTES <= UI_BYTES, "la memoria del 2D no alcanza");
+_Static_assert(IMG_PITCH % 64 == 0, "pitch de imagen múltiplo de 64");
 _Static_assert(ATLAS_PITCH % 64 == 0, "pitch de textura múltiplo de 64");
 
 static struct {
@@ -29,6 +34,8 @@ static struct {
 	uint32_t vb_off[2];
 	uint32_t fence[2];
 	rsxkit_draw draw;
+	rsxkit_draw img[RSXKIT_UI_IMAGES];  /* como draw, con la textura de cada ranura */
+	int img_ok[RSXKIT_UI_IMAGES];
 } ui;
 
 int rsxkit_ui_init(void)
@@ -69,7 +76,40 @@ int rsxkit_ui_init(void)
 	/* color = T0 · C */
 	for (int c = 0; c < 4; c++)
 		d->k[RSXKIT_K_T0][1][c] = 1.0f;
+	/* Las ranuras de imagen: el mismo estado, con otra textura (sin tamaño
+	 * hasta que se sube una). */
+	for (int i = 0; i < RSXKIT_UI_IMAGES; i++) {
+		ui.img[i] = ui.draw;
+		rsxkit_texture *it = &ui.img[i].tex[0];
+		it->offset = ui.off + IMG_BASE + (uint32_t)i * IMG_BYTES;
+		it->pitch = IMG_PITCH;
+	}
 	ui.ready = 1;
+	return RSXKIT_OK;
+}
+
+int rsxkit_ui_image_set(int slot, const uint8_t *rgba, uint32_t w, uint32_t h)
+{
+	if (!ui.ready)
+		return RSXKIT_EARG;
+	if (slot < 0 || slot >= RSXKIT_UI_IMAGES || !rgba || !w || !h || w > RSXKIT_UI_IMAGE_MAX_W ||
+	    h > RSXKIT_UI_IMAGE_MAX_H)
+		return RSXKIT_EARG;
+	/* El RSX puede estar leyendo la imagen anterior en un cuadro en vuelo. */
+	for (int i = 0; i < 2; i++)
+		if (ui.fence[i])
+			rsxkit_fence_wait(ui.fence[i]);
+	uint8_t *dst = ui.mem + IMG_BASE + (size_t)slot * IMG_BYTES;
+	for (uint32_t y = 0; y < h; y++)
+		memcpy(dst + (size_t)y * IMG_PITCH, rgba + (size_t)y * w * 4, (size_t)w * 4);
+	__sync_synchronize();
+	rsxkit_texture *t = &ui.img[slot].tex[0];
+	t->width = (uint16_t)w;
+	t->height = (uint16_t)h;
+	t->xf[0] = 1.0f / (float)w;
+	t->xf[1] = 1.0f / (float)h;
+	ui.img_ok[slot] = 1;
+	rsxkit_ui_image_size(slot, w, h);
 	return RSXKIT_OK;
 }
 
@@ -85,6 +125,9 @@ void rsxkit_ui_begin(float lw, float lh)
 	ui.draw.scissor[0] = ui.draw.scissor[1] = 0.0f;
 	ui.draw.scissor[2] = lw;
 	ui.draw.scissor[3] = lh;
+	/* Las ranuras de imagen se copiaron de ui.draw al iniciar: el recorte también. */
+	for (int i = 0; i < RSXKIT_UI_IMAGES; i++)
+		memcpy(ui.img[i].scissor, ui.draw.scissor, sizeof ui.draw.scissor);
 	rsxkit_ui_batch(ui.vb[ui.half], VB_CAP, lw, lh);
 	ui.active = 1;
 }
@@ -103,8 +146,10 @@ void rsxkit_ui_end(void)
 		rsxkit_vertices(ui.vb_off[ui.half], RSXKIT_MEM_MAIN);
 		for (uint32_t g = 0; g < groups; g++) {
 			uint32_t end = g + 1 < groups ? first[g + 1] : n;
-			if (end > first[g])
-				rsxkit_draw_triangles(&ui.draw, first[g], end - first[g]);
+			uint32_t img = rsxkit_ui_group_image(g);
+			rsxkit_draw *d = img && ui.img_ok[img - 1] ? &ui.img[img - 1] : &ui.draw;
+			if (end > first[g] && (!img || ui.img_ok[img - 1]))
+				rsxkit_draw_triangles(d, first[g], end - first[g]);
 		}
 	}
 	ui.fence[ui.half] = rsxkit_fence();
