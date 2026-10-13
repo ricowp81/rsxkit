@@ -33,6 +33,8 @@
 /* Shaders de rsxkit compilados con cgcomp y embebidos por el Makefile. */
 extern const u8 rsxkit_post_vpo[];
 extern const u8 rsxkit_post_reduce_fpo[];
+extern const u8 rsxkit_post_reduce_h_fpo[];
+extern const u8 rsxkit_post_reduce_v_fpo[];
 
 #define SURF_ALIGN 128
 
@@ -41,6 +43,7 @@ struct rsxkit_surface {
 	uint32_t w, h, pitch, offset;
 	rsxkit_post_format format;
 	void *mem;
+	int main;  /* memoria principal del que la creó (rsxkit_surface_wrap_main) */
 	uint32_t last_use;
 };
 
@@ -64,6 +67,10 @@ static struct {
 	uint32_t seq;               /* último valor de RSXKIT_LABEL_POST enviado */
 	rsxkit_program *reduce;
 	int reduce_factor;          /* factor con que están puestas sus constantes */
+	rsxkit_program *reduce_h, *reduce_v;  /* en dos pasadas */
+	int reduce2_factor;
+	rsxkit_surface *reduce_tmp;  /* la tabla entre las dos (fp16) */
+	int reduce_passes;          /* 1 o 2 (0: aún sin elegir, 2) */
 } post;
 
 static inline u32 halves(u32 w)
@@ -122,12 +129,39 @@ rsxkit_surface *rsxkit_surface_create(uint32_t width, uint32_t height, rsxkit_po
 	return NULL;
 }
 
+rsxkit_surface *rsxkit_surface_wrap_main(uint32_t width, uint32_t height, rsxkit_post_format format, void *mem,
+					 uint32_t offset, uint32_t pitch)
+{
+	if (!width || !height || width > 4096 || height > 4096 || (unsigned)format >= RSXKIT_POST_FORMATS || !mem ||
+	    ((uintptr_t)mem & (SURF_ALIGN - 1)) || (offset & (SURF_ALIGN - 1)) || (pitch & 63) ||
+	    pitch < width * surf_formats[format].bpp)
+		return NULL;
+	post_init();
+	for (int i = 0; i < RSXKIT_SURFACES_MAX; i++) {
+		struct rsxkit_surface *s = &surfaces[i];
+		if (s->used)
+			continue;
+		memset(s, 0, sizeof *s);
+		s->pitch = pitch;
+		s->mem = mem;
+		s->offset = offset;
+		s->main = 1;
+		s->w = width;
+		s->h = height;
+		s->format = format;
+		s->used = 1;
+		return s;
+	}
+	return NULL;
+}
+
 void rsxkit_surface_destroy(rsxkit_surface *s)
 {
 	if (!s || !s->used)
 		return;
 	wait_use(s->last_use);
-	rsxFree(s->mem);
+	if (!s->main)
+		rsxFree(s->mem);
 	s->used = 0;
 }
 
@@ -152,7 +186,7 @@ uint32_t rsxkit_surface_bytes(void)
 {
 	uint32_t n = 0;
 	for (int i = 0; i < RSXKIT_SURFACES_MAX; i++)
-		if (surfaces[i].used)
+		if (surfaces[i].used && !surfaces[i].main)
 			n += surfaces[i].pitch * surfaces[i].h;
 	return n;
 }
@@ -326,7 +360,7 @@ static void set_input(gcmContextData *ctx, u8 unit, const rsxkit_post_input *in)
 		tex.height = s->h;
 		tex.pitch = s->pitch;
 		tex.offset = s->offset;
-		tex.location = GCM_LOCATION_RSX;
+		tex.location = s->main ? GCM_LOCATION_CELL : GCM_LOCATION_RSX;
 	} else {
 		rsxkit_format_gcm((rsxkit_format)in->tex.format, &fmt, &remap);
 		tex.width = in->tex.width;
@@ -374,7 +408,7 @@ static int bind_output(struct rsxkit_surface *s, uint32_t *w, uint32_t *h)
 	memset(&sf, 0, sizeof sf);
 	sf.colorFormat = surf_formats[s->format].surface;
 	sf.colorTarget = GCM_SURFACE_TARGET_0;
-	sf.colorLocation[0] = GCM_LOCATION_RSX;
+	sf.colorLocation[0] = s->main ? GCM_LOCATION_CELL : GCM_LOCATION_RSX;
 	sf.colorOffset[0] = s->offset;
 	sf.colorPitch[0] = s->pitch;
 	for (int i = 1; i < GCM_MAX_MRT_COUNT; i++) {
@@ -483,6 +517,74 @@ static void reduce_taps(int f, float off[4], float w[4])
 	}
 }
 
+/* Las constantes de un programa de reducción para el factor f. */
+static void reduce_set(rsxkit_program *p, int f)
+{
+	float off[4], wt[4];
+	reduce_taps(f, off, wt);
+	rsxkit_program_set(p, "tx", off, 1);
+	rsxkit_program_set(p, "wx", wt, 1);
+}
+
+int rsxkit_post_reduce_passes(int passes)
+{
+	int was = post.reduce_passes ? post.reduce_passes : 2;
+	if (passes == 1 || passes == 2)
+		post.reduce_passes = passes;
+	return was;
+}
+
+/* La primera pasada deja (w × region.h) en la tabla fp16; la segunda la
+ * reduce a lo alto en `dst`. */
+static int reduce_two(const rsxkit_texture *src, const rsxkit_rect *region, uint32_t factor, rsxkit_surface *dst,
+		      uint32_t w, uint32_t h)
+{
+	if (!post.reduce_h) {
+		post.reduce_h = rsxkit_program_create(rsxkit_post_reduce_h_fpo);
+		post.reduce_v = rsxkit_program_create(rsxkit_post_reduce_v_fpo);
+		if (!post.reduce_h || !post.reduce_v) {
+			rsxkit_program_destroy(post.reduce_h);
+			rsxkit_program_destroy(post.reduce_v);
+			post.reduce_h = post.reduce_v = NULL;
+			return RSXKIT_ENOMEM;
+		}
+		post.reduce2_factor = 0;
+	}
+	if (post.reduce2_factor != (int)factor) {
+		reduce_set(post.reduce_h, (int)factor);
+		reduce_set(post.reduce_v, (int)factor);
+		post.reduce2_factor = (int)factor;
+	}
+	uint32_t tw, th;
+	rsxkit_surface_size(post.reduce_tmp, &tw, &th);
+	if (tw < w || th < region->h) {
+		rsxkit_surface_destroy(post.reduce_tmp);
+		post.reduce_tmp = rsxkit_surface_create(w > tw ? w : tw, region->h > th ? region->h : th,
+							RSXKIT_POST_RGBA16F);
+		if (!post.reduce_tmp)
+			return RSXKIT_ENOMEM;
+	}
+	rsxkit_post_pass p;
+	memset(&p, 0, sizeof p);
+	p.program = post.reduce_h;
+	p.out = post.reduce_tmp;
+	p.rect = (rsxkit_rect){ 0, 0, w, region->h };
+	p.in[0] = rsxkit_post_texture_input(src, RSXKIT_FILTER_LINEAR, RSXKIT_POST_CLAMP);
+	p.inputs = 1;
+	p.k[0][0] = (float)region->x;
+	p.k[0][1] = (float)region->y;
+	p.k[0][2] = (float)factor;
+	int rc = rsxkit_post_run(&p);
+	if (rc != RSXKIT_OK)
+		return rc;
+	p.program = post.reduce_v;
+	p.out = dst;
+	p.rect = (rsxkit_rect){ 0, 0, w, h };
+	p.in[0] = rsxkit_post_surface_input(post.reduce_tmp, RSXKIT_FILTER_LINEAR, RSXKIT_POST_CLAMP);
+	p.k[0][0] = p.k[0][1] = 0.0f;
+	return rsxkit_post_run(&p);
+}
+
 int rsxkit_post_reduce(const rsxkit_texture *src, const rsxkit_rect *region, uint32_t factor, rsxkit_surface *dst)
 {
 	if (!src || !region || !dst || !dst->used || factor < 1 || factor > 6 || region->x < 0 || region->y < 0)
@@ -490,6 +592,8 @@ int rsxkit_post_reduce(const rsxkit_texture *src, const rsxkit_rect *region, uin
 	uint32_t w = region->w / factor, h = region->h / factor;
 	if (!w || !h || w > dst->w || h > dst->h)
 		return RSXKIT_EARG;
+	if (factor > 1 && post.reduce_passes != 1)
+		return reduce_two(src, region, factor, dst, w, h);
 	if (!post.reduce) {
 		post.reduce = rsxkit_program_create(rsxkit_post_reduce_fpo);
 		if (!post.reduce)
@@ -497,10 +601,7 @@ int rsxkit_post_reduce(const rsxkit_texture *src, const rsxkit_rect *region, uin
 		post.reduce_factor = 0;
 	}
 	if (post.reduce_factor != (int)factor) {
-		float off[4], wt[4];
-		reduce_taps((int)factor, off, wt);
-		rsxkit_program_set(post.reduce, "tx", off, 1);
-		rsxkit_program_set(post.reduce, "wx", wt, 1);
+		reduce_set(post.reduce, (int)factor);
 		post.reduce_factor = (int)factor;
 	}
 	rsxkit_post_pass p;
@@ -553,10 +654,12 @@ void rsxkit_post_shutdown(void)
 		}
 	for (int i = 0; i < RSXKIT_SURFACES_MAX; i++)
 		if (surfaces[i].used) {
-			rsxFree(surfaces[i].mem);
+			if (!surfaces[i].main)
+				rsxFree(surfaces[i].mem);
 			surfaces[i].used = 0;
 		}
-	post.reduce = NULL;
+	post.reduce = post.reduce_h = post.reduce_v = NULL;
+	post.reduce_tmp = NULL;
 	post.ready = 0;
 }
 

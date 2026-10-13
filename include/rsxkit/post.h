@@ -48,7 +48,17 @@ typedef struct rsxkit_surface rsxkit_surface;
  * contenido definido. */
 #define RSXKIT_SURFACES_MAX 24
 rsxkit_surface *rsxkit_surface_create(uint32_t width, uint32_t height, rsxkit_post_format format);
-/* Espera a que el RSX deje de usarla y la libera. NULL no hace nada. */
+/* Una superficie sobre memoria principal que ya mapeó quien llama
+ * (rsxkit_map_main: `mem` alineada a 128 bytes, `offset` el que dio el
+ * mapeo, `pitch` múltiplo de 64): el RSX la dibuja y la CPU o un SPE la
+ * leen sin la lentitud de leer la memoria local desde el Cell, o al revés
+ * (la escriben ellos y el RSX la lee como textura, algo más lento que de la
+ * memoria local). rsxkit no la libera; cuenta en RSXKIT_SURFACES_MAX, no
+ * en rsxkit_surface_bytes. */
+rsxkit_surface *rsxkit_surface_wrap_main(uint32_t width, uint32_t height, rsxkit_post_format format, void *mem,
+					 uint32_t offset, uint32_t pitch);
+/* Espera a que el RSX deje de usarla y la libera (si es de
+ * rsxkit_surface_wrap_main, solo la suelta). NULL no hace nada. */
 void rsxkit_surface_destroy(rsxkit_surface *s);
 void rsxkit_surface_size(const rsxkit_surface *s, uint32_t *width, uint32_t *height);
 /* Memoria local que ocupan las superficies vivas, en bytes. */
@@ -143,12 +153,22 @@ rsxkit_post_input rsxkit_post_texture_input(const rsxkit_texture *t, rsxkit_filt
 int rsxkit_post_run(const rsxkit_post_pass *p);
 
 /* Reduce la región `region` (en texeles) de `src` con un filtro de caja:
- * cada píxel de `dst` es el promedio de un bloque factor × factor (1 a 6),
- * con 3 × 3 lecturas bilineales. Escribe region.w / factor ×
- * region.h / factor píxeles desde la esquina de `dst`. Sirve para llevar
- * una imagen dibujada a resolución interna alta a la de la consola (con
- * factor 1 la copia tal cual). Devuelve lo de rsxkit_post_run. */
+ * cada píxel de `dst` es el promedio de un bloque factor × factor (1 a 6).
+ * Escribe region.w / factor × region.h / factor píxeles desde la esquina
+ * de `dst`. Sirve para llevar una imagen dibujada a resolución interna alta
+ * a la de la consola (con factor 1 la copia tal cual). Por omisión en dos
+ * pasadas: primero a lo ancho, con 3 lecturas bilineales por píxel, sobre
+ * una tabla fp16 interna de (region.w / factor) × region.h, y después a lo
+ * alto, para que el RSX lea la imagen grande por filas seguidas (en una
+ * sola pasada cada píxel lee un bloque de factor filas de una superficie
+ * lineal: 3,1 ms en la PS3 para 320 × 237 a factor 5, casi todo la lectura
+ * y no las cuentas). Devuelve lo de rsxkit_post_run
+ * o RSXKIT_ENOMEM (sin memoria para la tabla). */
 int rsxkit_post_reduce(const rsxkit_texture *src, const rsxkit_rect *region, uint32_t factor, rsxkit_surface *dst);
+/* 1: rsxkit_post_reduce en una sola pasada (3 × 3 lecturas bilineales por
+ * píxel, sin tabla); 2: en dos. Devuelve lo que había. Otro valor solo
+ * pregunta. */
+int rsxkit_post_reduce_passes(int passes);
 
 /* La última imagen subida a un framebuffer 2D, como textura. false si no
  * hay. */
