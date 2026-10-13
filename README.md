@@ -12,10 +12,13 @@ cuadro con doble búfer, un framebuffer 2D escalado, dibujo 3D en destinos
 de render a una escala entera (triángulos con una combinación lineal de dos
 texturas y el color del vértice, o con un fragment program generado en
 tiempo de ejecución para cualquier polinomio en esas entradas), texto con
-una fuente de mapa de bits y un 2D para menús (rectángulos, texto
-escalable y ondas animadas en el RSX). Lo que viene (conversión de
-texturas en SPE, filtros de posprocesado) se agregará con la misma regla:
-nada específico de un sistema emulado.
+una fuente de mapa de bits, un 2D para menús (rectángulos, texto
+escalable y ondas animadas en el RSX) y la maquinaria de posprocesado
+(pasadas encadenadas con fragment programs precompilados, sobre
+superficies intermedias, y marcas de tiempo del RSX para medirlas). Lo que
+viene (conversión de texturas en SPE) se agregará con la misma regla: nada
+específico de un sistema emulado. Los filtros concretos no van aquí: los
+pone quien usa rsxkit, con sus propios programas.
 
 ## Compilar
 
@@ -333,11 +336,72 @@ for (;;) {
 - Hasta `RSXKIT_UI_MAX_QUADS` (4096) quads por cuadro; los de más se
   descartan y se cuentan (`rsxkit_ui_dropped`).
 
+### Posprocesado (`rsxkit/post.h`)
+
+Pasadas de pantalla completa con fragment programs precompilados (Cg con
+cgcomp), encadenadas sobre superficies intermedias hasta la pantalla del
+cuadro. Es la maquinaria; los filtros (un CRT, un escalado) los escribe
+quien la usa.
+
+```c
+#include <rsxkit/post.h>
+
+/* Al preparar (una vez por tamaño): superficies y programas. */
+rsxkit_surface *chico = rsxkit_surface_create(320, 240, RSXKIT_POST_RGBA8);
+rsxkit_surface *tabla = rsxkit_surface_create(320, 240, RSXKIT_POST_RGBA16F);
+rsxkit_program *p1 = rsxkit_program_create(mi_tabla_fpo);
+rsxkit_program *p2 = rsxkit_program_create(mi_final_fpo);
+const float gamma[4] = { 2.4f, 0, 0, 0 };
+rsxkit_program_set(p1, "k", gamma, 1);          /* uniform float4 k */
+
+/* En cada cuadro, entre rsxkit_frame_begin y rsxkit_frame_end: */
+rsxkit_texture src;
+rsxkit_target_texture(destino, 0, 0, &src);     /* la imagen a escala 5× */
+rsxkit_post_reduce(&src, &region, 5, chico);    /* a 320 × 240, filtro de caja */
+rsxkit_post_pass a = { .program = p1, .out = tabla, .inputs = 1 };
+a.in[0] = rsxkit_post_surface_input(chico, RSXKIT_FILTER_NEAREST, RSXKIT_POST_CLAMP);
+rsxkit_post_run(&a);
+rsxkit_post_pass b = { .program = p2, .out = NULL, .rect = en_pantalla, .inputs = 1 };
+b.in[0] = rsxkit_post_surface_input(tabla, RSXKIT_FILTER_LINEAR, RSXKIT_POST_BORDER);
+rsxkit_post_run(&b);
+```
+
+| Función | Qué hace |
+|---|---|
+| `rsxkit_surface_create(w, h, format)` / `_destroy` | Superficie lineal en la memoria local: `RSXKIT_POST_RGBA8` (A8R8G8B8) o `RSXKIT_POST_RGBA16F` (4 × fp16). Se dibuja con una pasada y se lee como textura en las siguientes; ninguna puede ser más grande que la profundidad de la pantalla (que va ligada con ella; `rsxkit_depth_reserve`). Hasta 24. `rsxkit_surface_data` da sus píxeles para pruebas (lento). |
+| `rsxkit_program_create(fpo)` / `_destroy` | Un .fpo de cgcomp con su propia copia en la memoria del RSX: dos programas del mismo .fpo pueden llevar constantes distintas. Hasta 32. |
+| `rsxkit_program_set(p, name, v, count)` | Un `uniform float4` (o `count` elementos de un arreglo). En el RSX las constantes van dentro del microcódigo, una copia en cada instrucción que las lee; se parchea la copia del programa (si el RSX lo está usando, espera). Para valores que cambian poco; lo que cambia en cada dibujo va en `pass.k`. |
+| `rsxkit_post_run(pass)` | Dibuja el rectángulo `pass.rect` de la salida (`pass.out`, o la pantalla si es NULL) con el programa y hasta 8 texturas (`pass.in`, unidad = índice). Antes espera en el RSX a que termine lo anterior e invalida la caché de texturas: una pasada puede leer lo que escribió la anterior o un destino recién dibujado. |
+| `rsxkit_post_reduce(src, region, factor, dst)` | Filtro de caja: cada píxel de `dst` promedia un bloque `factor × factor` (1–6) de la región, con 3 × 3 lecturas bilineales. Para llevar una imagen dibujada a escala interna alta a la resolución de la consola. |
+| `rsxkit_post_surface_input` / `rsxkit_post_texture_input` | Una entrada: superficie intermedia o cualquier `rsxkit_texture` (`rsxkit_target_texture`, `rsxkit_fb_texture`), con filtro, modo fuera de la imagen (`RSXKIT_POST_CLAMP`, `_BORDER` = 0, `_REPEAT`) y coordenadas en texeles. |
+| `rsxkit_stamp(i)` / `rsxkit_stamp_ns(i)` | Marca de tiempo del RSX (0 .. 63): el RSX escribe su reloj en ns cuando llega a ese punto y terminó lo anterior; se lee cuando una barrera posterior pasó (`rsxkit_fence_done`). La diferencia entre dos marcas es lo que tardó lo mandado entre ellas. |
+
+Lo que recibe el fragment program:
+
+- `TEXCOORD0`: `xy = origin + (i + 0,5, j + 0,5)·step` en el centro del
+  píxel `(i, j)` del rectángulo (con `origin = 0`, `step = 1`: los píxeles
+  desde su esquina, con la y hacia abajo) y `zw` normalizadas en el
+  rectángulo. El RSX interpola con un error de ~1e-6: si una cuenta
+  necesita el centro exacto (empates, `floor` de una posición que puede
+  caer en un entero), usar `floor(pos.xy) + 0.5`.
+- `TEXCOORD1..7`: las constantes del dibujo (`pass.k`), iguales en todo el
+  rectángulo. Llegan como atributos que el vertex program copia: no se
+  tocan las constantes del vertex program del 3D ni se parchea nada.
+- Texturas en `TEXUNIT0..7`, como las declare el programa.
+
+Con cgcomp, las cuentas en texeles necesitan fp32: compilar con
+`-Wcg,-nofastprecision` (cgcomp pide `-fastprecision` a Cg, que baja a
+fp16 lo que cree que lo aguanta). Y tres errores de cgcomp que conviene
+conocer (detalles en `docs/rsx-notes.md` de Salsa64): no ensambla bien los
+códigos de condición (`?:`, `sign`), escribe el color de salida en R0
+aunque Cg lo use de temporal, y codifica mal `|R0.z|` (valor absoluto con
+un componente).
+
 ## Recursos del RSX que usa
 
 - Etiquetas 255 (`rsxkit_finish`), de 254 hacia abajo dos por framebuffer
-  (247–254 con 4 framebuffers) y 246 (barreras). Las de 0 a 63 son del
-  sistema.
+  (247–254 con 4 framebuffers), 246 (barreras) y 245 (posprocesado). Las de
+  0 a 63 son del sistema. Reportes 1984 a 2047 (marcas de tiempo).
 - Programas: el blit (`shaders/rsxkit_blit.*`) y el 3D
   (`rsxkit_lincomb.vcg` con 27 constantes desde la 0, salidas COLOR0 y
   TEXCOORD0..7; `rsxkit_lincomb{0,1,2}.fcg` y los generados, en un pool
@@ -355,10 +419,16 @@ for (;;) {
   pantalla (11 MB a 720p, 24 MB a 1080), `2 × max_w × max_h × 4` bytes por
   framebuffer y `w × h × 4` por destino y por profundidad.
 - Memoria principal mapeada: 2 MB si se usa `rsxkit_ui_init`.
+- Posprocesado: lo que midan las superficies (`rsxkit_surface_bytes`) y una
+  copia de cada programa (memoria local y principal). Vertex program
+  `rsxkit_post.vcg` (atributos POSITION y TEXCOORD0..7, en modo inmediato).
 
 ## Origen del código
 
-Código propio. La inicialización del RSX sigue el sample `rsxtest` de
+Código propio. Las marcas de tiempo escriben el método GET_REPORT
+(0x1800) a mano: `rsxSetTimeStamp` de PSL1GHT (f649a08) deja el dato en la
+palabra equivocada y el RSX escribe el reporte en un lugar cualquiera. La
+inicialización del RSX sigue el sample `rsxtest` de
 PSL1GHT (MIT); el formato de instrucción del fragment program viene de
 `nvfx_shader.h` y `compilerfp.cpp` de cgcomp (PSL1GHT, MIT), cotejado con
 los programas que cgcomp compila de `shaders/rsxkit_lincomb*.fcg`. Los
