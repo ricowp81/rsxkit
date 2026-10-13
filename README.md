@@ -371,5 +371,6 @@ público). El agrandado de los glifos del atlas (`src/ui_geom.c`) aplica la
 regla de Scale2x/EPX, escrita aquí a partir de su descripción pública (no
 se copió código). Las ranuras de imagen del 2D (`rsxkit_ui_image_set` y
 `rsxkit_ui_image`, para las carátulas del menú de Salsa64) son una
-contribución de VIDEOGAMES SCZ. No contiene código de proyectos GPL ni de
-proyectos sin licencia clara.
+contribución de VIDEOGAMES SCZ, bajo MIT con su conformidad
+(2026-10-13). No contiene código de proyectos GPL ni de proyectos sin
+licencia clara.
