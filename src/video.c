@@ -220,6 +220,7 @@ void rsxkit_shutdown(void)
 	rsxkit_fb_shutdown();
 	rsxkit_3d_shutdown();
 	rsxkit_target_shutdown();
+	rsxkit_post_shutdown();
 	free_screen_buffers();
 	g->ctx = NULL;
 }
@@ -308,8 +309,12 @@ void rsxkit_bind_screen(void)
 
 void rsxkit_set_2d_state(void)
 {
+	rsxkit_set_2d_state_size(rsxkit_g.screen.width, rsxkit_g.screen.height);
+}
+
+void rsxkit_set_2d_state_size(uint32_t w, uint32_t h)
+{
 	struct rsxkit_state *g = &rsxkit_g;
-	uint32_t w = g->screen.width, h = g->screen.height;
 	f32 scale[4] = { w * 0.5f, h * -0.5f, 0.5f, 0.0f };
 	f32 offset[4] = { w * 0.5f, h * 0.5f, 0.5f, 0.0f };
 

@@ -48,10 +48,14 @@ static void fix_perspective(u32 *ucode, u32 size)
 }
 
 /* Los programas subidos, con una suma de su copia en la memoria del RSX,
- * para ver si alguien la pisó (rsxkit_fp_verify). */
-#define FP_TRACKED 16
+ * para ver si alguien la pisó (rsxkit_fp_verify). `src` es de donde se
+ * restaura: el microcódigo del .fpo (con `fix`, se le limpia la corrección
+ * de perspectiva al copiarlo) o la copia propia de un programa de
+ * posprocesado, ya arreglada y con sus constantes. */
+#define FP_TRACKED 64
 static struct {
-	rsxFragmentProgram *fp;
+	const void *src;
+	int fix;
 	u32 *buf;
 	u32 size, sum;
 } tracked[FP_TRACKED];
@@ -65,13 +69,42 @@ static u32 checksum(const volatile u32 *p, u32 size)
 	return s;
 }
 
-static void copy_program(rsxFragmentProgram *fp, void *buf)
+void rsxkit_fp_fix_perspective(void *ucode, u32 size)
 {
-	void *ucode;
-	u32 size;
-	rsxFragmentProgramGetUCode(fp, &ucode, &size);
-	memcpy(buf, ucode, size);
-	fix_perspective(buf, size);
+	fix_perspective((u32 *)ucode, size);
+}
+
+void rsxkit_fp_track(void *buf, const void *src, u32 size, int fix)
+{
+	for (unsigned i = 0; i < ntracked; i++)
+		if (tracked[i].buf == buf) {
+			tracked[i].sum = checksum(buf, size);
+			return;
+		}
+	if (ntracked >= FP_TRACKED)
+		return;
+	tracked[ntracked].src = src;
+	tracked[ntracked].fix = fix;
+	tracked[ntracked].buf = buf;
+	tracked[ntracked].size = size;
+	tracked[ntracked].sum = checksum(buf, size);
+	ntracked++;
+}
+
+void rsxkit_fp_untrack(void *buf)
+{
+	for (unsigned i = 0; i < ntracked; i++)
+		if (tracked[i].buf == buf) {
+			tracked[i] = tracked[--ntracked];
+			return;
+		}
+}
+
+static void restore(unsigned i)
+{
+	memcpy(tracked[i].buf, tracked[i].src, tracked[i].size);
+	if (tracked[i].fix)
+		fix_perspective(tracked[i].buf, tracked[i].size);
 }
 
 void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset)
@@ -82,15 +115,10 @@ void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset)
 	void *buf = rsxMemalign(64, size);
 	if (!buf)
 		return NULL;
-	copy_program(fp, buf);
+	memcpy(buf, ucode, size);
+	fix_perspective(buf, size);
 	rsxAddressToOffset(buf, offset);
-	if (ntracked < FP_TRACKED) {
-		tracked[ntracked].fp = fp;
-		tracked[ntracked].buf = buf;
-		tracked[ntracked].size = size;
-		tracked[ntracked].sum = checksum(buf, size);
-		ntracked++;
-	}
+	rsxkit_fp_track(buf, ucode, size, 1);
 	return buf;
 }
 
@@ -102,7 +130,7 @@ int rsxkit_fp_verify(int repair)
 			continue;
 		bad++;
 		if (repair)
-			copy_program(tracked[i].fp, tracked[i].buf);
+			restore(i);
 	}
 	return bad;
 }

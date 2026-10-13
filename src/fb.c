@@ -49,6 +49,14 @@ static const struct fmt_info formats[RSXKIT_FORMAT_COUNT] = {
 	[RSXKIT_XRGB8888] = { GCM_TEXTURE_FORMAT_A8R8G8B8, 4, REMAP_ARGB },
 };
 
+void rsxkit_format_gcm(rsxkit_format format, u8 *gcm, u32 *remap)
+{
+	if ((unsigned)format >= RSXKIT_FORMAT_COUNT)
+		format = RSXKIT_XRGB8888;
+	*gcm = formats[format].gcm;
+	*remap = formats[format].remap;
+}
+
 struct rsxkit_fb {
 	int used;
 	int index;
@@ -199,6 +207,20 @@ rsxkit_rect rsxkit_layout(uint32_t width, uint32_t height, const rsxkit_view *vi
 	r.x = (int32_t)(sc->width - r.w) / 2;
 	r.y = (int32_t)(sc->height - r.h) / 2;
 	return r;
+}
+
+bool rsxkit_fb_texture(const rsxkit_fb *fb, rsxkit_texture *out)
+{
+	memset(out, 0, sizeof *out);
+	if (!fb || !fb->used || fb->slot < 0)
+		return false;
+	out->offset = fb->tex_offset[fb->slot];
+	out->pitch = fb->pitch;
+	out->width = (uint16_t)fb->w;
+	out->height = (uint16_t)fb->h;
+	out->location = RSXKIT_MEM_LOCAL;
+	out->format = (uint8_t)fb->format;
+	return true;
 }
 
 int rsxkit_blit_init(void)

@@ -5,6 +5,7 @@
 
 #include <rsx/rsx.h>
 
+#include "rsxkit/post.h"
 #include "rsxkit/rsxkit.h"
 
 #define RSXKIT_FB_MAX       4
@@ -13,6 +14,10 @@
 #define RSXKIT_LABEL_FINISH 255
 #define RSXKIT_LABEL_FB(i, slot) (254 - 2 * (i) - (slot))
 #define RSXKIT_LABEL_FENCE  246
+/* Posprocesado (post.c): el último dibujo de cada programa y superficie. */
+#define RSXKIT_LABEL_POST   245
+/* Marcas de tiempo (post.c): reportes del RSX desde este índice. */
+#define RSXKIT_STAMP_BASE   (2048 - RSXKIT_STAMPS)
 
 struct rsxkit_state {
 	gcmContextData *ctx;
@@ -76,12 +81,25 @@ void rsxkit_leave_3d(void);
 void rsxkit_forget_state(void);
 void rsxkit_3d_shutdown(void);
 void rsxkit_target_shutdown(void);
+void rsxkit_post_shutdown(void);
 /* Copia un fragment program a la memoria del RSX, con interpolación de
  * perspectiva en todas sus entradas (fprog.c). NULL si no hay memoria. */
 void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset);
-/* Programas subidos con rsxkit_fp_upload cuya copia en la memoria del RSX
- * cambió; con `repair`, los vuelve a copiar. */
+/* Programas subidos con rsxkit_fp_upload o registrados con
+ * rsxkit_fp_track cuya copia en la memoria del RSX cambió; con `repair`,
+ * los vuelve a copiar. */
 int rsxkit_fp_verify(int repair);
+/* Registra (o, si ya estaba, vuelve a sumar) la copia `buf` de un programa
+ * para rsxkit_fp_verify, que la restaura desde `src` (con `fix`, limpiando
+ * la corrección de perspectiva como rsxkit_fp_upload). */
+void rsxkit_fp_track(void *buf, const void *src, u32 size, int fix);
+void rsxkit_fp_untrack(void *buf);
+void rsxkit_fp_fix_perspective(void *ucode, u32 size);
+/* Formato y reordenamiento de canales de textura del RSX para un
+ * rsxkit_format (fb.c). */
+void rsxkit_format_gcm(rsxkit_format format, u8 *gcm, u32 *remap);
+/* rsxkit_set_2d_state sobre una superficie de w × h (post.c). */
+void rsxkit_set_2d_state_size(uint32_t w, uint32_t h);
 /* Vacía la caché de programas generados: se generan y suben de nuevo. */
 void rsxkit_fp_flush(void);
 /* Programas generados (fpcache.c): el de una descripción, generado y

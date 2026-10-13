@@ -54,7 +54,11 @@ $(OBJ)/%.vpo: $(HERE)/shaders/%.vcg
 $(OBJ)/%.fpo: $(HERE)/shaders/%.fcg
 	@echo "  CGCOMP  $(notdir $<)"
 	@mkdir -p $(@D)
-	$(VERB)cgcomp -f $< $@
+	$(VERB)cgcomp -f $(CGFLAGS) $< $@
+
+# cgcomp compila con -fastprecision: Cg baja a fp16 las cuentas que cree que
+# lo aguantan. Las del posprocesado van en texeles (hasta miles): en fp32.
+$(OBJ)/rsxkit_post%.fpo: CGFLAGS := -Wcg,-nofastprecision
 
 # bin2s exporta <archivo>_<ext> alineado a 64 bytes (fb.c declara los símbolos).
 define EMBED
