@@ -310,11 +310,13 @@ for (;;) {
 
 | Función | Qué hace |
 |---|---|
-| `int rsxkit_ui_init(void)` | Reserva 2 MB de memoria principal mapeada al RSX: el atlas de la fuente y dos búferes de vértices que se turnan con una barrera. |
+| `int rsxkit_ui_init(void)` | Reserva 3 MB de memoria principal mapeada al RSX: el atlas de la fuente, dos búferes de vértices que se turnan con una barrera y `RSXKIT_UI_IMAGES` ranuras de imagen. |
 | `void rsxkit_ui_begin(lw, lh)` / `rsxkit_ui_end()` | Empieza el lote sobre la pantalla del cuadro (`rsxkit_bind_frame`) con espacio lógico `lw × lh` / lo envía. |
 | `rsxkit_ui_gradient(x, y, w, h, tl, tr, bl, br)` / `rsxkit_ui_rect(x, y, w, h, rgba)` | Rectángulo con un color por esquina / de un color. |
 | `float rsxkit_ui_text(x, y, utf8, scale, rgba, max_cells)` | Texto: a escala 1 cada carácter mide 8 × 13 unidades. Con `max_cells`, «…» al final si no cabe. Devuelve el ancho. |
 | `rsxkit_ui_wave(const rsxkit_wave *w, float t)` | Una onda a lo ancho: cresta de dos senos con línea brillante y lámina que se desvanece hacia abajo, en el instante `t`. |
+| `int rsxkit_ui_image_set(slot, rgba, w, h)` | Sube una imagen RGBA8888 (bytes R, G, B, A; hasta `RSXKIT_UI_IMAGE_MAX_W × _H`, 320 × 448) a una ranura (`RSXKIT_UI_IMAGES`, hoy 1). Espera a que el RSX termine los cuadros que la usan: se llama entre cuadros y rara vez (al cambiar de carátula). |
+| `rsxkit_ui_image(slot, x, y, w, h, rgba)` | Dibuja la imagen de la ranura estirada al rectángulo; `rgba` la tiñe y le da alfa (`0xFFFFFFFF` tal cual). Sin imagen subida, no dibuja nada. |
 | `void rsxkit_bind_frame(lw, lh)` (`rsxkit.h`) | El 3D de `rsxkit_draw_triangles` sobre la pantalla del cuadro en vez de un destino. |
 
 - Colores `0xRRGGBBAA`. Todo con mezcla alfa, sin profundidad.
@@ -354,7 +356,8 @@ for (;;) {
 - Memoria local: 2 búferes de color + 1 de profundidad del tamaño de la
   pantalla (11 MB a 720p, 24 MB a 1080), `2 × max_w × max_h × 4` bytes por
   framebuffer y `w × h × 4` por destino y por profundidad.
-- Memoria principal mapeada: 2 MB si se usa `rsxkit_ui_init`.
+- Memoria principal mapeada: 3 MB si se usa `rsxkit_ui_init` (2 MB del
+  atlas y los vértices, más 576 KB por ranura de imagen redondeados a 64 KB).
 
 ## Origen del código
 
@@ -366,5 +369,7 @@ glifos de `src/font_8x13.h` son los de la fuente «fixed» 8x13 de X11
 (gitlab.freedesktop.org/xorg/font/misc-misc, `8x13.bdf`, de dominio
 público). El agrandado de los glifos del atlas (`src/ui_geom.c`) aplica la
 regla de Scale2x/EPX, escrita aquí a partir de su descripción pública (no
-se copió código). No contiene código de proyectos GPL ni de proyectos sin
-licencia clara.
+se copió código). Las ranuras de imagen del 2D (`rsxkit_ui_image_set` y
+`rsxkit_ui_image`, para las carátulas del menú de Salsa64) son una
+contribución de VIDEOGAMES SCZ. No contiene código de proyectos GPL ni de
+proyectos sin licencia clara.
