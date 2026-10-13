@@ -487,8 +487,12 @@ int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch
 void rsxkit_pixels_565_to_5551(uint16_t *dst, const uint16_t *src, uint32_t n)
 {
 	uint32_t i = 0;
-	/* Cuatro píxeles por palabra de 64 bits: R y los 5 bits altos de G
+	/* Uno a uno hasta alinear el destino (una copia que empieza en una
+	 * columna cualquiera): desde ahí, si el origen también queda alineado,
+	 * cuatro píxeles por palabra de 64 bits: R y los 5 bits altos de G
 	 * quedan donde están, B sube un bit y el alfa es 1. */
+	for (; i < n && ((uintptr_t)(dst + i) & 7); i++)
+		dst[i] = (uint16_t)((src[i] & 0xFFC0) | ((src[i] & 0x1F) << 1) | 1);
 	for (; i + 4 <= n && !((uintptr_t)(src + i) & 7) && !((uintptr_t)(dst + i) & 7); i += 4) {
 		uint64_t q;
 		memcpy(&q, src + i, 8);
