@@ -555,12 +555,15 @@ static int reduce_two(const rsxkit_texture *src, const rsxkit_rect *region, uint
 		reduce_set(post.reduce_v, (int)factor);
 		post.reduce2_factor = (int)factor;
 	}
+	/* Del tamaño justo, no la más grande que hizo falta: una salida se liga
+	 * con la profundidad de la pantalla y no puede ser más alta que ella.
+	 * Al bajar la escala interna (5× → 3×), la profundidad vuelve a la de la
+	 * pantalla y la tabla de 5× (región.h = 1185) ya no se podía ligar. */
 	uint32_t tw, th;
 	rsxkit_surface_size(post.reduce_tmp, &tw, &th);
-	if (tw < w || th < region->h) {
+	if (tw != w || th != region->h) {
 		rsxkit_surface_destroy(post.reduce_tmp);
-		post.reduce_tmp = rsxkit_surface_create(w > tw ? w : tw, region->h > th ? region->h : th,
-							RSXKIT_POST_RGBA16F);
+		post.reduce_tmp = rsxkit_surface_create(w, region->h, RSXKIT_POST_RGBA16F);
 		if (!post.reduce_tmp)
 			return RSXKIT_ENOMEM;
 	}
