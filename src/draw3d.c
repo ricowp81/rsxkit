@@ -15,7 +15,11 @@
  *
  * Profundidad: z/w en [0, 1] con LEQUAL; sin recorte por los planos
  * cercano y lejano (la z se satura), como hacen los microcódigos de N64
- * sin recorte cercano. El recorte por w > 0 lo sigue haciendo el RSX.
+ * sin recorte cercano. El recorte por w > 0 lo sigue haciendo el RSX. Con
+ * RSXKIT_DEPTH_CONST el viewport lleva la z de todo vértice a la del
+ * dibujo (escala 0): la división entre w redondea distinto en cada vértice
+ * y deja pendientes de un bit que, entre dibujos coplanares, deciden al
+ * azar quién pasa la prueba.
  */
 #include <string.h>
 
@@ -213,6 +217,19 @@ static void set_depth(uint8_t depth)
 	rsxSetPolygonOffsetFillEnable(ctx, (depth & RSXKIT_DEPTH_OFFSET) ? GCM_TRUE : GCM_FALSE);
 }
 
+/* z < 0: la de los vértices (el viewport que puso rsxkit_bind). */
+static void set_zconst(float z)
+{
+	if (z == rsxkit_bound.vp_z)
+		return;
+	rsxkit_bound.vp_z = z;
+	/* Como rsxkit_bind, salvo la z. */
+	uint32_t w = rsxkit_bound.w, h = rsxkit_bound.h;
+	f32 scale[4] = { w * 0.5f, h * -0.5f, z < 0.0f ? 0.5f : 0.0f, 0.0f };
+	f32 offset[4] = { w * 0.5f, h * 0.5f, z < 0.0f ? 0.5f : z, 0.0f };
+	rsxSetViewport(rsxkit_g.ctx, 0, 0, w, h, 0.0f, 1.0f, scale, offset);
+}
+
 static void set_cull(uint8_t cull)
 {
 	gcmContextData *ctx = rsxkit_g.ctx;
@@ -407,6 +424,9 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	set_scissor(d->scissor);
 	set_blend(d->blend);
 	set_depth(d->depth);
+	/* Sin prueba ni escritura la z no importa: no se toca el viewport. */
+	if (d3.depth & (RSXKIT_DEPTH_TEST | RSXKIT_DEPTH_WRITE))
+		set_zconst(d->depth & RSXKIT_DEPTH_CONST ? (d->z < 0.0f ? 0.0f : d->z > 1.0f ? 1.0f : d->z) : -1.0f);
 	set_cull(d->cull);
 	set_alpha(d->alpha_ref);
 	for (int i = 0; i < ntex; i++)

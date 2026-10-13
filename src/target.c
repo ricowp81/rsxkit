@@ -239,6 +239,9 @@ int rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 	rsxkit_bound.sx = t->w / rsxkit_bound.lw;
 	rsxkit_bound.sy = t->h / rsxkit_bound.lh;
 	rsxkit_bound.scissor_valid = 0;
+	rsxkit_bound.w = t->w;
+	rsxkit_bound.h = t->h;
+	rsxkit_bound.vp_z = -1.0f;
 	g->screen_bound = 0;
 	g->state_valid = 0;
 	return RSXKIT_OK;

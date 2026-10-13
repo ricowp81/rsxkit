@@ -278,6 +278,11 @@ typedef enum rsxkit_cull {
 #define RSXKIT_DEPTH_TEST   0x1u
 #define RSXKIT_DEPTH_WRITE  0x2u
 #define RSXKIT_DEPTH_OFFSET 0x4u  /* acercar un poco (calcomanías) */
+/* Todo el dibujo con la profundidad `z` de rsxkit_draw (en [0, 1]) en vez
+ * de la de sus vértices: la pone el viewport, sin la división entre w, así
+ * que dos dibujos con la misma z dan la misma en cada píxel y la prueba
+ * LEQUAL deja pasar al último (orden de pintor con z-buffer). */
+#define RSXKIT_DEPTH_CONST  0x8u
 
 /* Lo que evalúa el RSX por píxel, con
  *   X_j = k[j][0] + k[j][1]·C + k[j][2]·C.aaaa    (C = color del vértice)
@@ -310,7 +315,7 @@ typedef struct rsxkit_draw {
 	float fog_color[4];
 	rsxkit_texture tex[2];
 	uint8_t factors[RSXKIT_K_TERMS][RSXKIT_K_FACTORS];  /* RSXKIT_FP_*, 0 = fin */
-	uint8_t pad2[4];
+	float z;            /* con RSXKIT_DEPTH_CONST: la profundidad de todo el dibujo */
 	float k[RSXKIT_K_TERMS][3][4];
 } rsxkit_draw;
 

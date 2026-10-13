@@ -56,6 +56,8 @@ struct rsxkit_bound {
 	float sx, sy;        /* píxeles del destino por unidad lógica */
 	int scissor_valid;
 	uint32_t scissor[4]; /* último puesto, en píxeles */
+	uint32_t w, h;       /* superficie del destino, en píxeles */
+	float vp_z;          /* z fija del viewport (RSXKIT_DEPTH_CONST); < 0: la de los vértices */
 };
 extern struct rsxkit_bound rsxkit_bound;
 void rsxkit_logical_rect(const float r[4], uint32_t out[4]);

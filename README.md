@@ -190,6 +190,14 @@ rsxkit_draw_triangles(&d, first, count);
   (frente = antihorario con la y hacia arriba), prueba de alfa, tijeras
   lógicas y niebla por vértice (`fog`: mezcla hacia `fog_color` según
   `C.a`). La z no se recorta contra los planos cercano y lejano: se satura.
+- **Profundidad constante** (`RSXKIT_DEPTH_CONST`): todo el dibujo prueba y
+  escribe la `z` de `rsxkit_draw` en vez de la de sus vértices. La pone el
+  viewport (escala 0, desplazamiento `z`), no la división entre w, así que
+  dos dibujos con la misma `z` dan exactamente la misma profundidad en cada
+  píxel y LEQUAL deja pasar al último: orden de pintor sobre un z-buffer
+  (la profundidad del primitivo del RDP de la N64). Con `z = c` en los
+  vértices (`pos[2] = c·pos[3]`) cada vértice redondearía distinto y los
+  dibujos coplanares se pisarían al azar.
 - `rsxkit_vertices` invalida las cachés de vértices y texturas del RSX:
   llamarlo cada vez que cambió lo que hay en memoria.
 - rsxkit recuerda el estado y solo reenvía lo que cambió.
