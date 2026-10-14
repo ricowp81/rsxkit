@@ -268,8 +268,15 @@ void rsxkit_logical_rect(const float r[4], uint32_t out[4])
 	const struct rsxkit_target *t = rsxkit_bound.target;
 	float x0 = r ? r[0] * rsxkit_bound.sx : 0.0f, y0 = r ? r[1] * rsxkit_bound.sy : 0.0f;
 	float x1 = r ? r[2] * rsxkit_bound.sx : (float)t->w, y1 = r ? r[3] * rsxkit_bound.sy : (float)t->h;
+	/* Las cuatro dentro del destino: unas tijeras con la esquina izquierda
+	 * fuera de la superficie (x0 > x1: vacías) daban una x por encima del
+	 * máximo del RSX (4095) a escalas altas. F-Zero X manda x0 = 1023,75
+	 * con x1 = 308 al entrar a la carrera; a 5× era x = 5119, y la PS3 se
+	 * colgó ahí (RPCS3 no). */
 	if (x0 < 0.0f) x0 = 0.0f;
 	if (y0 < 0.0f) y0 = 0.0f;
+	if (x0 > (float)t->w) x0 = (float)t->w;
+	if (y0 > (float)t->h) y0 = (float)t->h;
 	if (x1 > (float)t->w) x1 = (float)t->w;
 	if (y1 > (float)t->h) y1 = (float)t->h;
 	out[0] = (uint32_t)(x0 + 0.5f);

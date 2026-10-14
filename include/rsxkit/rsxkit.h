@@ -327,7 +327,8 @@ typedef struct rsxkit_draw {
 	 * centro del píxel deja ver. Para dibujos opacos: con mezcla, la arista
 	 * se mezclaría dos veces. */
 	uint8_t edges;
-	float scissor[4];   /* x0, y0, x1, y1 lógicos */
+	float scissor[4];   /* x0, y0, x1, y1 lógicos; se recortan al destino y,
+	                       vacías (x0 ≥ x1 o y0 ≥ y1), el dibujo no se manda */
 	float fog_color[4];
 	rsxkit_texture tex[2];
 	uint8_t factors[RSXKIT_K_TERMS][RSXKIT_K_FACTORS];  /* RSXKIT_FP_*, 0 = fin */

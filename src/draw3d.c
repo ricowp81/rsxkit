@@ -312,11 +312,10 @@ static void set_alpha(uint8_t ref)
 		rsxSetAlphaFunc(ctx, GCM_GEQUAL, ref);
 }
 
-static void set_scissor(const float s[4])
+/* r: las tijeras en píxeles del destino (rsxkit_logical_rect), no vacías. */
+static void set_scissor(const uint32_t r[4])
 {
-	uint32_t r[4];
-	rsxkit_logical_rect(s, r);
-	uint32_t w = r[2] > r[0] ? r[2] - r[0] : 0, h = r[3] > r[1] ? r[3] - r[1] : 0;
+	uint32_t w = r[2] - r[0], h = r[3] - r[1];
 	uint32_t v[4] = { r[0], r[1], w, h };
 	if (rsxkit_bound.scissor_valid && !memcmp(v, rsxkit_bound.scissor, sizeof v))
 		return;
@@ -452,6 +451,12 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	gcmContextData *ctx = g->ctx;
 	if (!count || !d3.vb_set || !rsxkit_bound.target || g->screen_bound || init_3d() != RSXKIT_OK)
 		return;
+	/* Con las tijeras vacías no hay nada que dibujar: no se manda (unas
+	 * tijeras de ancho o alto 0 no son algo que el RSX tenga que ver). */
+	uint32_t sc[4];
+	rsxkit_logical_rect(d->scissor, sc);
+	if (sc[2] <= sc[0] || sc[3] <= sc[1])
+		return;
 	/* Lo más que escribe un dibujo: programa de vértices (~140), constantes
 	 * (~140), programa de fragmentos (~22), texturas, estado y el dibujo. */
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
@@ -494,7 +499,7 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	}
 	if (!g->arrays_bound)
 		bind_arrays();
-	set_scissor(d->scissor);
+	set_scissor(sc);
 	set_blend(d->blend);
 	set_depth(d->depth);
 	/* Sin prueba ni escritura la z no importa: no se toca el viewport. */

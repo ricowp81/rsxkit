@@ -188,7 +188,8 @@ rsxkit_draw_triangles(&d, first, count);
 - **Estado**: mezcla (opaca, alfa, aditiva, sin color), profundidad (prueba
   LEQUAL, escritura, desplazamiento para calcomanías), recorte de caras
   (frente = antihorario con la y hacia arriba), prueba de alfa, tijeras
-  lógicas y niebla por vértice (`fog`: mezcla hacia `fog_color` según
+  lógicas (recortadas al destino; si quedan vacías el dibujo no se manda:
+  el RSX de la PS3 se colgó con una x de tijeras mayor que 4095) y niebla por vértice (`fog`: mezcla hacia `fog_color` según
   `C.a`). La z no se recorta contra los planos cercano y lejano: se satura.
 - **Profundidad constante** (`RSXKIT_DEPTH_CONST`): todo el dibujo prueba y
   escribe la `z` de `rsxkit_draw` en vez de la de sus vértices. La pone el
