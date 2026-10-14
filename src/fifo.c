@@ -40,9 +40,21 @@ static s32 __attribute__((noinline)) fifo_callback(gcmContextData *context, u32 
 	return (s32)r3;
 }
 
+/* El callback espera sin tope a que el RSX deje libre el segmento
+ * siguiente, y su lógica es del sistema (sin fuente: no se puede saber de
+ * antemano si va a esperar). Queda anotado como espera (wait.c) para que un
+ * vigía en otro hilo vea si se queda ahí. Perdido el RSX (rsxkit_lost) no
+ * se llama: lo que se escriba pisa el segmento en curso y no llega. */
 void rsxkit_reserve(uint32_t words)
 {
 	gcmContextData *ctx = rsxkit_g.ctx;
-	if (ctx && ctx->current + words > ctx->end)
-		fifo_callback(ctx, words);
+	if (!ctx || ctx->current + words <= ctx->end)
+		return;
+	if (rsxkit_lost()) {
+		ctx->current = ctx->begin;
+		return;
+	}
+	rsxkit_wait_begin(RSXKIT_WAIT_FIFO, "FIFO", 0, words, 0);
+	fifo_callback(ctx, words);
+	rsxkit_wait_end();
 }

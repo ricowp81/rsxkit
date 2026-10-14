@@ -69,6 +69,12 @@ void rsxkit_reserve(uint32_t words);
 
 /* Espera a que la etiqueta llegue a `value` (comparación con vuelta). */
 void rsxkit_wait_label(uint8_t index, uint32_t value);
+/* Esperas largas (wait.c): cada espera que no se cumple de entrada anota
+ * qué espera (begin), da una vuelta de tick por cada sondeo (false: la
+ * aplicación la abandonó, salir del bucle) y termina con end. */
+void rsxkit_wait_begin(rsxkit_wait_kind kind, const char *what, uint32_t label, uint32_t expected, uint32_t current);
+bool rsxkit_wait_tick(uint32_t current);
+void rsxkit_wait_end(void);
 /* Viewport y estado fijo del dibujo 2D sobre la superficie en curso. */
 void rsxkit_set_2d_state(void);
 /* Vuelve a la pantalla (búfer trasero) como superficie, con el estado 2D. */

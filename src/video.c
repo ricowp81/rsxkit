@@ -34,14 +34,29 @@ static bool wait_flip(uint64_t max_us)
 	struct rsxkit_state *g = &rsxkit_g;
 	if (!g->flip_pending)
 		return true;
+	if (rsxkit_lost())
+		return true;
 	uint64_t t0 = sysGetSystemTime();
-	while (gcmGetFlipStatus() != 0) {
-		if (max_us && sysGetSystemTime() - t0 > max_us)
-			return false;
+	bool waited = false, ok = true;
+	u32 st;
+	while ((st = gcmGetFlipStatus()) != 0) {
+		if (max_us && sysGetSystemTime() - t0 > max_us) {
+			ok = false;
+			break;
+		}
+		if (!waited) {
+			rsxkit_wait_begin(RSXKIT_WAIT_FLIP, "flip", 0, 0, st);
+			waited = true;
+		}
 		sysUsleep(200);
+		if (!rsxkit_wait_tick(st))
+			break;
 	}
-	g->flip_pending = 0;
-	return true;
+	if (waited)
+		rsxkit_wait_end();
+	if (ok)
+		g->flip_pending = 0;
+	return ok;
 }
 
 void rsxkit_wait_label(uint8_t index, uint32_t value)
@@ -49,9 +64,17 @@ void rsxkit_wait_label(uint8_t index, uint32_t value)
 	volatile uint32_t *label = gcmGetLabelAddress(index);
 	if ((int32_t)(*label - value) >= 0)
 		return;
+	if (rsxkit_lost())
+		return;
 	rsxFlushBuffer(rsxkit_g.ctx);  /* por si la escritura sigue en el búfer */
-	while ((int32_t)(*label - value) < 0)
+	rsxkit_wait_begin(RSXKIT_WAIT_LABEL, rsxkit_label_name(index), index, value, *label);
+	uint32_t v;
+	while ((int32_t)((v = *label) - value) < 0) {
 		sysUsleep(30);
+		if (!rsxkit_wait_tick(v))
+			break;
+	}
+	rsxkit_wait_end();
 }
 
 /* Primer modo de la lista que la tele da; -1 si ninguno. */

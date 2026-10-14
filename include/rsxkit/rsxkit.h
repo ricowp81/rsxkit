@@ -104,6 +104,57 @@ int rsxkit_after_system(void);
 int rsxkit_main_maps_bad(void);
 /* Espera a que el RSX termine todo lo enviado. */
 void rsxkit_finish(void);
+/* ---- Esperas largas ------------------------------------------------------ */
+
+/* Si el RSX deja de avanzar (se colgó, o una orden espera algo que nunca
+ * llega), el PPE se queda esperándolo: una barrera, rsxkit_finish, el flip
+ * o lugar en el búfer de comandos. Estas funciones dejan ver y acotar esas
+ * esperas. */
+typedef enum rsxkit_wait_kind {
+	RSXKIT_WAIT_NONE = 0,
+	RSXKIT_WAIT_LABEL,  /* una etiqueta: barrera, rsxkit_finish, framebuffer, posprocesado */
+	RSXKIT_WAIT_FLIP,   /* el flip en vuelo (rsxkit_frame_begin y _end) */
+	RSXKIT_WAIT_FIFO,   /* lugar en el búfer de comandos (callback del sistema) */
+} rsxkit_wait_kind;
+
+typedef struct rsxkit_wait_info {
+	rsxkit_wait_kind kind;
+	const char *what;     /* "barrera", "rsxkit_finish", "framebuffer", "flip", "FIFO"… */
+	uint32_t label;       /* LABEL: índice de la etiqueta */
+	uint32_t expected;    /* LABEL: valor esperado; FIFO: palabras pedidas */
+	uint32_t current;     /* LABEL: valor de la etiqueta; FLIP: estado del flip (0 = ocurrió) */
+	uint32_t get, put;    /* GET y PUT del búfer de comandos (offsets del RSX), ahora */
+	uint32_t get0;        /* GET al empezar la espera: si no cambió, el RSX no avanzó */
+	uint64_t since_us;    /* sysGetSystemTime al empezar */
+	uint64_t elapsed_us;
+	uint32_t calls;       /* llamadas al gancho en esta espera (1: la primera) */
+	bool done;            /* la espera terminó (solo si el gancho ya se había llamado) */
+} rsxkit_wait_info;
+
+/* El gancho se llama desde el hilo que espera, dentro de la llamada a
+ * rsxkit que espera, cuando la espera pasa de `after_us` y después cada
+ * `period_us` mientras siga, y una vez más al terminar (info->done). Sirve
+ * para diagnosticar y para atender al sistema (sysUtilCheckCallback) o
+ * salir; no puede llamar a rsxkit. Devuelve false para abandonar la espera:
+ * rsxkit queda «perdido» (rsxkit_lost) y no vuelve a esperar al RSX (lo que
+ * mande después puede perderse): queda cerrar y salir. La espera de lugar
+ * en el búfer de comandos corre dentro del callback del sistema y no llama
+ * al gancho: un vigía en otro hilo la ve con rsxkit_wait_now. fn NULL:
+ * sin gancho. */
+typedef bool (*rsxkit_wait_hook)(void *ctx, const rsxkit_wait_info *info);
+void rsxkit_set_wait_hook(rsxkit_wait_hook fn, void *ctx, uint32_t after_us, uint32_t period_us);
+/* La espera en curso (false si no hay ninguna), con GET, PUT y el tiempo
+ * de ahora. Se puede llamar desde otro hilo (diagnóstico). */
+bool rsxkit_wait_now(rsxkit_wait_info *out);
+/* true si un gancho abandonó una espera. */
+bool rsxkit_lost(void);
+/* Prueba del gancho: deja al RSX girando para siempre en un salto a sí
+ * mismo del búfer de comandos (todo lo que siga no llega). Solo para
+ * probar lo que hace la aplicación con un RSX colgado. */
+void rsxkit_debug_stall(void);
+/* Nombre de una etiqueta de rsxkit ("barrera", "rsxkit_finish"…). */
+const char *rsxkit_label_name(uint32_t index);
+
 /* Búfer de color en que se está dibujando (X8R8G8B8), para pruebas: leerlo
  * desde el PPE es lento. Llamar a rsxkit_finish antes. */
 const uint32_t *rsxkit_back_buffer(uint32_t *pitch_bytes);
