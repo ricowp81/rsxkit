@@ -3,7 +3,8 @@
  * rsxkit — vertex program del dibujo 3D con posiciones interpoladas
  * (rsxkit_vertices_prev, draw3d.c): el de rsxkit_lincomb.vcg con la
  * posición prev + (position − prev)·lerp.x, prev en TEXCOORD1 (un float4
- * por vértice en un arreglo aparte). Lo demás, igual que allá:
+ * por vértice en un arreglo aparte; su z no se usa: la profundidad z/w es la
+ * de position, así el PPE no divide por vértice). Lo demás, igual que allá:
  *
  * position: coordenadas homogéneas en el espacio lógico del destino
  * (x/w, y/w en píxeles lógicos con la y hacia abajo; z/w en [0, 1]).
@@ -25,6 +26,7 @@ void main(float4 position : POSITION, float2 st : TEXCOORD0, float4 color : COLO
 	out float4 oX6 : TEXCOORD7)
 {
 	float4 p = prev + (position - prev) * lerp.x;
+	p.z = position.z * (p.w * (1.0 / position.w));
 	oPosition = float4(p.x * space.x - p.w, p.w - p.y * space.y, p.z * 2.0 - p.w, p.w);
 	oColor = color;
 	oUV = float4(st * xf[0].xy + xf[0].zw, st * xf[1].xy + xf[1].zw);
