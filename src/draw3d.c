@@ -29,6 +29,9 @@
 
 #include "internal.h"
 
+/* Método del NV40 para el ancho de línea (nv40.h: NV40TCL_LINE_WIDTH). */
+#define NV40_LINE_WIDTH 0x3b8u
+
 extern const u8 rsxkit_lincomb_vpo[];
 extern const u8 rsxkit_lincomb_lerp_vpo[];
 extern const u8 rsxkit_lincomb0_fpo[];
@@ -70,6 +73,7 @@ static struct {
 	int lerp_valid;
 	/* Estado puesto. */
 	uint8_t blend, cull, depth, alpha_ref;
+	uint8_t line_width;  /* ancho de línea (6.3) de las aristas; 0: no se sabe */
 	struct tex_state tex[2];
 	uint32_t vb_offset;
 	uint8_t vb_location;
@@ -223,6 +227,7 @@ static void fixed_state(void)
 	rsxSetPolygonOffset(ctx, -1.0f, -2.0f);
 	/* Forzar que el primer dibujo ponga todo. */
 	d3.blend = d3.cull = d3.depth = d3.alpha_ref = 0xFF;
+	d3.line_width = 0;
 	d3.tex[0].valid = d3.tex[1].valid = 0;
 	rsxkit_bound.scissor_valid = 0;
 	g->state_valid = 1;
@@ -370,6 +375,12 @@ static void set_texture(int unit, const rsxkit_texture *t)
 	u8 gcm;
 	u32 remap;
 	texture_format(t->format, &gcm, &remap);
+	if (t->remap == RSXKIT_REMAP_RRRR)
+		remap = GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY, GCM_TEXTURE_REMAP_COLOR_R,
+					       GCM_TEXTURE_REMAP_COLOR_R, GCM_TEXTURE_REMAP_COLOR_R,
+					       GCM_TEXTURE_REMAP_COLOR_R, GCM_TEXTURE_REMAP_TYPE_REMAP,
+					       GCM_TEXTURE_REMAP_TYPE_REMAP, GCM_TEXTURE_REMAP_TYPE_REMAP,
+					       GCM_TEXTURE_REMAP_TYPE_REMAP);
 	tex.format = gcm | GCM_TEXTURE_FORMAT_LIN | GCM_TEXTURE_FORMAT_NRM;
 	tex.mipmap = 1;
 	tex.dimension = GCM_TEXTURE_DIMS_2D;
@@ -494,5 +505,33 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	for (int i = 0; i < ntex; i++)
 		set_texture(i, &d->tex[i]);
 	set_constants(d, vp);
+	if (d->edges) {
+		/* Las aristas primero (rsxkit_draw.edges); el modo de polígono no
+		 * cambia la eliminación de caras: van solo las de los triángulos que
+		 * se dibujan. La z de un píxel de línea es la del punto de la arista,
+		 * no la del centro del píxel: con LEQUAL le ganaría al relleno en los
+		 * dibujos con mucha pendiente de z (tiras finas). Desplazadas hacia
+		 * atrás, el relleno siempre pasa donde cubre; con 8 veces la
+		 * pendiente, tampoco le ganan a piezas vecinas casi coplanares ya
+		 * dibujadas, y en las grietas lo de atrás está lejos. */
+		if (d->edges != d3.line_width) {
+			/* PSL1GHT no tiene rsxSetLineWidth: el método del NV40, con el
+			 * ancho en punto fijo 6.3 (como nouveau). */
+			u32 *p = (u32 *)ctx->current;
+			p[0] = (1u << 18) | NV40_LINE_WIDTH;
+			p[1] = d->edges;
+			ctx->current = p + 2;
+			d3.line_width = d->edges;
+		}
+		rsxSetPolygonOffset(ctx, 8.0f, 64.0f);
+		rsxSetPolygonOffsetLineEnable(ctx, GCM_TRUE);
+		rsxSetFrontPolygonMode(ctx, GCM_POLYGON_MODE_LINE);
+		rsxSetBackPolygonMode(ctx, GCM_POLYGON_MODE_LINE);
+		rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, first, count);
+		rsxSetFrontPolygonMode(ctx, GCM_POLYGON_MODE_FILL);
+		rsxSetBackPolygonMode(ctx, GCM_POLYGON_MODE_FILL);
+		rsxSetPolygonOffsetLineEnable(ctx, GCM_FALSE);
+		rsxSetPolygonOffset(ctx, -1.0f, -2.0f);  /* el de las calcomanías (fixed_state) */
+	}
 	rsxDrawVertexArray(ctx, GCM_TYPE_TRIANGLES, first, count);
 }
