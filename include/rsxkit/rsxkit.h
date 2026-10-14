@@ -258,9 +258,17 @@ typedef struct rsxkit_texture {
 	uint8_t format;     /* rsxkit_format */
 	uint8_t wrap_s, wrap_t;
 	uint8_t filter;     /* rsxkit_filter */
-	uint8_t pad[3];
+	uint8_t remap;      /* rsxkit_remap: canales que se leen */
+	uint8_t pad[2];
 	float xf[4];
 } rsxkit_texture;
+
+/* Canales que lee una textura: los de su formato, o el rojo en los cuatro
+ * (una imagen de intensidad dibujada en un destino: R = G = B = A). */
+typedef enum rsxkit_remap {
+	RSXKIT_REMAP_NONE,
+	RSXKIT_REMAP_RRRR,
+} rsxkit_remap;
 
 typedef enum rsxkit_blend {
 	RSXKIT_BLEND_OFF,    /* reemplaza */

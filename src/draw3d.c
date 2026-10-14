@@ -324,6 +324,12 @@ static void set_texture(int unit, const rsxkit_texture *t)
 	u8 gcm;
 	u32 remap;
 	texture_format(t->format, &gcm, &remap);
+	if (t->remap == RSXKIT_REMAP_RRRR)
+		remap = GCM_TEXTURE_REMAP_MODE(GCM_TEXTURE_REMAP_ORDER_XYXY, GCM_TEXTURE_REMAP_COLOR_R,
+					       GCM_TEXTURE_REMAP_COLOR_R, GCM_TEXTURE_REMAP_COLOR_R,
+					       GCM_TEXTURE_REMAP_COLOR_R, GCM_TEXTURE_REMAP_TYPE_REMAP,
+					       GCM_TEXTURE_REMAP_TYPE_REMAP, GCM_TEXTURE_REMAP_TYPE_REMAP,
+					       GCM_TEXTURE_REMAP_TYPE_REMAP);
 	tex.format = gcm | GCM_TEXTURE_FORMAT_LIN | GCM_TEXTURE_FORMAT_NRM;
 	tex.mipmap = 1;
 	tex.dimension = GCM_TEXTURE_DIMS_2D;
