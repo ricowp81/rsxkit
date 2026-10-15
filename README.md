@@ -1,5 +1,9 @@
 # rsxkit
 
+> **English:** A generic graphics layer for the PlayStation 3's RSX (video setup, double-buffered frames, 2D/3D drawing, a run-time fragment program generator and a post-processing chain), for homebrew built with [PSL1GHT](https://github.com/ps3dev/PSL1GHT). MIT licensed. It was born inside [Salsa64](https://github.com/ricowp81/Salsa64), a Nintendo 64 emulator for the PS3, but knows nothing about any emulated system. The documentation below is in Spanish; the API is plain C. Third-party material: [THIRD_PARTY.md](THIRD_PARTY.md).
+>
+> Repositorio propio: [github.com/ricowp81/rsxkit](https://github.com/ricowp81/rsxkit). Salsa64 lo lleva en `lib/rsxkit` (git subtree) y los cambios se sincronizan en los dos sentidos.
+
 Capa gráfica genérica para el RSX de la PlayStation 3 con
 [PSL1GHT](https://github.com/ps3dev/PSL1GHT). Nació dentro de Salsa64 (un
 emulador de N64), pero no sabe nada de ningún sistema emulado: sirve a
