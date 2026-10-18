@@ -268,10 +268,16 @@ static void set_depth(uint8_t depth)
 	if (depth == d3.depth)
 		return;
 	d3.depth = depth;
-	rsxSetDepthTestEnable(ctx, (depth & RSXKIT_DEPTH_TEST) ? GCM_TRUE : GCM_FALSE);
+	/* Escribir sin probar: en el RSX (como en GL) la prueba apagada apaga
+	 * también la escritura, así que va con la prueba encendida y ALWAYS.
+	 * Rogue Squadron dibuja así el fondo (hangar, terreno, cielo) para
+	 * dejar la z de cada cuadro sin borrarla: sin escribirla, los modelos
+	 * se probaban contra la z de cuadros viejos y desaparecían a pedazos. */
+	u32 func = !(depth & RSXKIT_DEPTH_TEST) ? GCM_ALWAYS : (depth & RSXKIT_DEPTH_LESS) ? GCM_LESS : GCM_LEQUAL;
+	rsxSetDepthTestEnable(ctx, (depth & (RSXKIT_DEPTH_TEST | RSXKIT_DEPTH_WRITE)) ? GCM_TRUE : GCM_FALSE);
 	rsxSetDepthWriteEnable(ctx, (depth & RSXKIT_DEPTH_WRITE) ? GCM_TRUE : GCM_FALSE);
 	rsxSetPolygonOffsetFillEnable(ctx, (depth & RSXKIT_DEPTH_OFFSET) ? GCM_TRUE : GCM_FALSE);
-	rsxSetDepthFunc(ctx, (depth & RSXKIT_DEPTH_LESS) ? GCM_LESS : GCM_LEQUAL);
+	rsxSetDepthFunc(ctx, func);
 }
 
 /* z < 0: la de los vértices (el viewport que puso rsxkit_bind). */
