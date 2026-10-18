@@ -272,7 +272,9 @@ static void set_depth(uint8_t depth)
 	 * también la escritura, así que va con la prueba encendida y ALWAYS.
 	 * Rogue Squadron dibuja así el fondo (hangar, terreno, cielo) para
 	 * dejar la z de cada cuadro sin borrarla: sin escribirla, los modelos
-	 * se probaban contra la z de cuadros viejos y desaparecían a pedazos. */
+	 * se probaban contra la z de cuadros viejos y desaparecían a pedazos.
+	 * La máscara de la Lente de la Verdad de Zelda (un TEXRECT que solo
+	 * escribe z) necesita lo mismo. */
 	u32 func = !(depth & RSXKIT_DEPTH_TEST) ? GCM_ALWAYS : (depth & RSXKIT_DEPTH_LESS) ? GCM_LESS : GCM_LEQUAL;
 	rsxSetDepthTestEnable(ctx, (depth & (RSXKIT_DEPTH_TEST | RSXKIT_DEPTH_WRITE)) ? GCM_TRUE : GCM_FALSE);
 	rsxSetDepthWriteEnable(ctx, (depth & RSXKIT_DEPTH_WRITE) ? GCM_TRUE : GCM_FALSE);
