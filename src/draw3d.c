@@ -268,10 +268,14 @@ static void set_depth(uint8_t depth)
 	if (depth == d3.depth)
 		return;
 	d3.depth = depth;
-	rsxSetDepthTestEnable(ctx, (depth & RSXKIT_DEPTH_TEST) ? GCM_TRUE : GCM_FALSE);
+	/* Como en OpenGL, el RSX solo escribe la z con la prueba de z encendida:
+	 * una escritura sin prueba (la máscara de la Lente de la Verdad de
+	 * Zelda, un TEXRECT que solo escribe z) pide la prueba con GCM_ALWAYS. */
+	bool wr_only = (depth & RSXKIT_DEPTH_WRITE) && !(depth & RSXKIT_DEPTH_TEST);
+	rsxSetDepthTestEnable(ctx, ((depth & RSXKIT_DEPTH_TEST) || wr_only) ? GCM_TRUE : GCM_FALSE);
 	rsxSetDepthWriteEnable(ctx, (depth & RSXKIT_DEPTH_WRITE) ? GCM_TRUE : GCM_FALSE);
 	rsxSetPolygonOffsetFillEnable(ctx, (depth & RSXKIT_DEPTH_OFFSET) ? GCM_TRUE : GCM_FALSE);
-	rsxSetDepthFunc(ctx, (depth & RSXKIT_DEPTH_LESS) ? GCM_LESS : GCM_LEQUAL);
+	rsxSetDepthFunc(ctx, wr_only ? GCM_ALWAYS : (depth & RSXKIT_DEPTH_LESS) ? GCM_LESS : GCM_LEQUAL);
 }
 
 /* z < 0: la de los vértices (el viewport que puso rsxkit_bind). */
