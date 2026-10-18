@@ -134,7 +134,7 @@ Vista (`rsxkit_view`):
 
 ### Destinos de render
 
-Un destino es una superficie X8R8G8B8 en la memoria local; la profundidad
+Un destino es una superficie X8R8G8B8 (o A8R8G8B8, ver abajo) en la memoria local; la profundidad
 (Z24S8) va aparte para que varios destinos compartan una. Al ligarlos se da
 un **espacio lógico** (por ejemplo 320×240) que se estira sobre todo el
 destino: un núcleo dibuja en sus coordenadas y la escala (2×, 3×…) la pone
@@ -146,7 +146,8 @@ el tamaño del destino.
 | `rsxkit_depth *rsxkit_depth_create(w, h)` / `rsxkit_depth_destroy(d)` | Profundidad; nace en 1. Debe ser al menos tan grande como el destino. |
 | `int rsxkit_bind(t, d, lw, lh)` | Dibujar en `t` (y `d`, o `NULL`) con espacio lógico `lw × lh`, hasta otro `rsxkit_bind` o `rsxkit_frame_begin`. Sin `d` (o con una más chica que `t`) liga la profundidad de la pantalla, con prueba y escritura apagadas; si tampoco cubre a `t`, no liga nada y devuelve `RSXKIT_EDEPTH` (una zeta más chica que el color puede fallar o recortar en el RSX). |
 | `int rsxkit_depth_reserve(w, h)` | Agranda la profundidad de la pantalla a al menos `w × h`, para ligar sin profundidad propia destinos más grandes que la pantalla (1600×1200 en 720p). Reserva al llamarla (fuera del bucle de dibujo), olvida lo ligado y se conserva en `rsxkit_video_reconfigure`; `0 × 0` vuelve al tamaño de la pantalla. `rsxkit_target_copy`, `rsxkit_target_fill` y `rsxkit_target_read` también devuelven `RSXKIT_EDEPTH` si su superficie no cabe en ella. |
-| `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). |
+| `rsxkit_target *rsxkit_target_create_ex(w, h, flags)` / `int rsxkit_target_has_alpha(t)` | Con `RSXKIT_TARGET_ALPHA`, un destino A8R8G8B8 con canal alfa, para render a textura con transparencia (una imagen RGBA5551 de una consola de 16 bits). Nace con alfa 0. Lo escriben: `rsxkit_clear` (el byte alto de `rgb` es el alfa), los dibujos (cada píxel escrito queda con alfa 1; con `rsxkit_draw.dst_alpha = RSXKIT_DSTA_FRAG` y `blend = RSXKIT_BLEND_OFF`, con el alfa del fragmento: rellenos de un color de alfa 0/1 y copias de textura), `rsxkit_target_fill` (el bit de alfa de `RSXKIT_RGBA5551`) y `rsxkit_target_copy` (copia el alfa si el origen también lo tiene). `rsxkit_target_texture` lo devuelve como `RSXKIT_XRGB8888`, cuyo alfa el 3D lee; el framebuffer 2D y `rsxkit_target_present` lo ignoran. Cada dibujo en un destino con alfa mezcla (ONE / ZERO en los opacos): úsese en los que se leen como textura, no en el cuadro principal. |
+| `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). `rgb` es `0x00RRGGBB`; en un destino con alfa el byte alto es el alfa. |
 | `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino (cualquier rectángulo: sirve para recortar el overscan) acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
 
 Un destino como textura, y de vuelta a la memoria principal (efectos de

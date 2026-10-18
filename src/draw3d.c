@@ -233,28 +233,40 @@ static void fixed_state(void)
 	g->state_valid = 1;
 }
 
-static void set_blend(uint8_t blend)
+/* El alfa que queda en un destino con alfa (rsxkit_bound.alpha): 1 en cada
+ * píxel escrito (la mezcla de alfa pasa a ONE / ZERO, que no mira el alfa
+ * del fragmento), o el del fragmento con RSXKIT_DSTA_FRAG sin mezcla. Sin
+ * alfa en el destino, el canal de alfa de la mezcla no cuenta. */
+static void set_blend(uint8_t blend, uint8_t dsta)
 {
 	gcmContextData *ctx = rsxkit_g.ctx;
-	if (blend == d3.blend)
+	uint8_t key = (uint8_t)(blend | (dsta ? 0x10 : 0));
+	if (key == d3.blend)
 		return;
-	d3.blend = blend;
+	d3.blend = key;
+	int alpha = rsxkit_bound.alpha;
 	u32 mask = GCM_COLOR_MASK_B | GCM_COLOR_MASK_G | GCM_COLOR_MASK_R | GCM_COLOR_MASK_A;
 	switch (blend) {
 	case RSXKIT_BLEND_ALPHA:
 		rsxSetBlendEnable(ctx, GCM_TRUE);
-		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA, GCM_ZERO, GCM_ONE);
+		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA, alpha ? GCM_ONE : GCM_ZERO,
+				alpha ? GCM_ZERO : GCM_ONE);
 		break;
 	case RSXKIT_BLEND_ADD:
 		rsxSetBlendEnable(ctx, GCM_TRUE);
-		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE, GCM_ZERO, GCM_ONE);
+		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE, alpha ? GCM_ONE : GCM_ZERO, alpha ? GCM_ZERO : GCM_ONE);
 		break;
 	case RSXKIT_BLEND_NONE:
 		rsxSetBlendEnable(ctx, GCM_FALSE);
 		mask = 0;
 		break;
 	default:
-		rsxSetBlendEnable(ctx, GCM_FALSE);
+		if (alpha && !dsta) {
+			rsxSetBlendEnable(ctx, GCM_TRUE);
+			rsxSetBlendFunc(ctx, GCM_ONE, GCM_ZERO, GCM_ONE, GCM_ZERO);
+		} else {
+			rsxSetBlendEnable(ctx, GCM_FALSE);
+		}
 		break;
 	}
 	rsxSetColorMask(ctx, mask);
@@ -508,7 +520,7 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	if (!g->arrays_bound)
 		bind_arrays();
 	set_scissor(sc);
-	set_blend(d->blend);
+	set_blend(d->blend, d->dst_alpha);
 	set_depth(d->depth);
 	/* Sin prueba ni escritura la z no importa: no se toca el viewport. */
 	if (d3.depth & (RSXKIT_DEPTH_TEST | RSXKIT_DEPTH_WRITE))

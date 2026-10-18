@@ -2,9 +2,11 @@
 /*
  * rsxkit — destinos de render, memoria principal mapeada y barreras.
  *
- * Un destino es una superficie lineal X8R8G8B8 en la memoria local del RSX
- * que después se puede leer como textura para presentarla escalada (como
- * el framebuffer 2D). La profundidad va aparte (Z24S8) para que varios
+ * Un destino es una superficie lineal en la memoria local del RSX que
+ * después se puede leer como textura para presentarla escalada (como el
+ * framebuffer 2D). Es X8R8G8B8, o A8R8G8B8 si se creó con
+ * RSXKIT_TARGET_ALPHA (el alfa va en el mismo byte: una textura leída del
+ * destino lo trae; ver rsxkit.h). La profundidad va aparte (Z24S8) para que varios
  * destinos compartan una, como hacen las consolas con su z-buffer.
  */
 #include <malloc.h>
@@ -22,6 +24,8 @@
 
 struct rsxkit_target {
 	int used;
+	int alpha;
+
 	uint32_t w, h, pitch, offset;
 	void *mem;
 };
@@ -106,6 +110,11 @@ static void *surface_alloc(uint32_t w, uint32_t h, uint32_t *pitch, uint32_t *of
 
 rsxkit_target *rsxkit_target_create(uint32_t width, uint32_t height)
 {
+	return rsxkit_target_create_ex(width, height, 0);
+}
+
+rsxkit_target *rsxkit_target_create_ex(uint32_t width, uint32_t height, uint32_t flags)
+{
 	if (!width || !height || width > 4096 || height > 4096)
 		return NULL;
 	for (int i = 0; i < TARGET_MAX; i++) {
@@ -117,6 +126,7 @@ rsxkit_target *rsxkit_target_create(uint32_t width, uint32_t height)
 		if (!t->mem)
 			return NULL;
 		memset(t->mem, 0, t->pitch * height);
+		t->alpha = (flags & RSXKIT_TARGET_ALPHA) != 0;
 		t->w = width;
 		t->h = height;
 		t->used = 1;
@@ -134,6 +144,11 @@ void rsxkit_target_destroy(rsxkit_target *t)
 	t->used = 0;
 	if (rsxkit_bound.target == t)
 		rsxkit_bound.target = NULL;
+}
+
+int rsxkit_target_has_alpha(const rsxkit_target *t)
+{
+	return t && t->used && t->alpha;
 }
 
 void rsxkit_target_size(const rsxkit_target *t, uint32_t *width, uint32_t *height)
@@ -259,7 +274,7 @@ int rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 
 	gcmSurface sf;
 	memset(&sf, 0, sizeof sf);
-	sf.colorFormat = GCM_SURFACE_X8R8G8B8;
+	sf.colorFormat = t->alpha ? GCM_SURFACE_A8R8G8B8 : GCM_SURFACE_X8R8G8B8;
 	sf.colorTarget = GCM_SURFACE_TARGET_0;
 	sf.colorLocation[0] = GCM_LOCATION_RSX;
 	sf.colorOffset[0] = t->offset;
@@ -289,6 +304,7 @@ int rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 	rsxSetScissor(g->ctx, 0, 0, t->w, t->h);
 
 	rsxkit_bound.target = t;
+	rsxkit_bound.alpha = t->alpha;
 	rsxkit_bound.depth = d;
 	rsxkit_bound.lw = lw > 0.0f ? lw : (float)t->w;
 	rsxkit_bound.lh = lh > 0.0f ? lh : (float)t->h;
@@ -363,7 +379,8 @@ void rsxkit_clear(uint32_t flags, uint32_t rgb, float depth, const float rect[4]
 	rsxkit_bound.scissor_valid = 0;
 	if (depth < 0.0f) depth = 0.0f;
 	if (depth > 1.0f) depth = 1.0f;
-	rsxSetClearColor(g->ctx, rgb & 0x00FFFFFFu);
+	/* El alfa (byte alto) solo cuenta en un destino con alfa. */
+	rsxSetClearColor(g->ctx, rsxkit_bound.alpha ? rgb : rgb & 0x00FFFFFFu);
 	rsxSetClearDepthStencil(g->ctx, (uint32_t)(depth * 16777215.0f) << 8);
 	rsxSetColorMask(g->ctx, GCM_COLOR_MASK_B | GCM_COLOR_MASK_G | GCM_COLOR_MASK_R | GCM_COLOR_MASK_A);
 	rsxSetDepthWriteEnable(g->ctx, GCM_TRUE);
@@ -383,7 +400,7 @@ void rsxkit_target_texture(const rsxkit_target *t, uint32_t y0, uint32_t rows, r
 	out->width = (uint16_t)t->w;
 	out->height = (uint16_t)rows;
 	out->location = RSXKIT_MEM_LOCAL;
-	out->format = RSXKIT_XRGB8888;
+	out->format = RSXKIT_XRGB8888;  /* con alfa real si t->alpha */
 }
 
 void rsxkit_texture_sync(void)
@@ -513,8 +530,12 @@ int rsxkit_target_copy(rsxkit_target *dst, const rsxkit_target *src)
 	rsxSetWaitForIdle(ctx);
 	rsxInvalidateTextureCache(ctx, GCM_INVALIDATE_TEXTURE);
 	rsxkit_rect full = { 0, 0, dst->w, dst->h };
+	/* Entre dos destinos con alfa, el alfa se copia; si no, el copiado
+	 * (o un destino sin alfa) queda con alfa 1 como antes. */
+	rsxkit_blit_alpha(dst->alpha && src->alpha);
 	rsxkit_blit_to(src->offset, RSXKIT_MEM_LOCAL, src->pitch, src->w, src->h, 0.0f, 0.0f, 1.0f, 1.0f, RSXKIT_XRGB8888,
 		       &full, dst->w, dst->h, RSXKIT_FILTER_NEAREST);
+	rsxkit_blit_alpha(0);
 	rsxkit_g.state_valid = 0;
 	return RSXKIT_OK;
 }
@@ -543,8 +564,10 @@ int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch
 	rsxSetAlphaTestEnable(ctx, GCM_FALSE);
 	rsxInvalidateTextureCache(ctx, GCM_INVALIDATE_TEXTURE);
 	rsxkit_rect full = { 0, 0, t->w, t->h };
+	rsxkit_blit_alpha(t->alpha);  /* el bit de alfa de RGBA5551 llega al destino */
 	rsxkit_blit_to(src_offset, RSXKIT_MEM_MAIN, src_pitch, w, h, 0.0f, 0.0f, 1.0f, 1.0f, format, &full, t->w, t->h,
 		       RSXKIT_FILTER_NEAREST);
+	rsxkit_blit_alpha(0);
 	/* El estado 3D hay que volver a ponerlo: lo ligado sigue siendo t. */
 	rsxkit_g.state_valid = 0;
 	return RSXKIT_OK;
@@ -578,8 +601,10 @@ int rsxkit_target_fill_rows(rsxkit_target *t, uint32_t src_offset, uint32_t src_
 	uint32_t d0 = (uint32_t)((uint64_t)y0 * t->h / h), d1 = (uint32_t)(((uint64_t)y1 * t->h + h - 1) / h);
 	rsxkit_rect r = { 0, (int32_t)d0, t->w, d1 - d0 };
 	float v0 = (float)d0 * h / t->h / h, v1 = (float)d1 * h / t->h / h;
+	rsxkit_blit_alpha(t->alpha);
 	rsxkit_blit_to(src_offset, RSXKIT_MEM_MAIN, src_pitch, w, h, 0.0f, v0, 1.0f, v1, format, &r, t->w, t->h,
 		       RSXKIT_FILTER_NEAREST);
+	rsxkit_blit_alpha(0);
 	rsxkit_g.state_valid = 0;
 	return RSXKIT_OK;
 }

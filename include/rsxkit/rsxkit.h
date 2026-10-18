@@ -233,11 +233,33 @@ void rsxkit_fence_wait(uint32_t fence);
 
 /* ---- Destinos de render ------------------------------------------------------ */
 
-typedef struct rsxkit_target rsxkit_target;  /* color X8R8G8B8, memoria local */
+typedef struct rsxkit_target rsxkit_target;  /* color X8R8G8B8 o A8R8G8B8, memoria local */
 typedef struct rsxkit_depth rsxkit_depth;    /* profundidad Z24S8, memoria local */
 
-/* NULL si no hay memoria. El color nace negro y la profundidad en 1. */
+/* NULL si no hay memoria. El color nace negro y la profundidad en 1.
+ * rsxkit_target_create: X8R8G8B8, sin alfa (el byte alto se ignora).
+ *
+ * rsxkit_target_create_ex con RSXKIT_TARGET_ALPHA: A8R8G8B8, un destino con
+ * canal alfa, para lo que se dibuja y luego se usa como textura (render a
+ * textura con transparencia: una imagen RGBA5551 de una consola de 16 bits).
+ * Nace con alfa 0. Lo que lo escribe:
+ *  - rsxkit_clear: el byte alto de `rgb` es el alfa;
+ *  - rsxkit_draw: cada píxel escrito queda con alfa 1 (la mezcla de alfa
+ *    del dibujo no toca el canal), o con el alfa del fragmento si
+ *    rsxkit_draw.dst_alpha = RSXKIT_DSTA_FRAG y blend es RSXKIT_BLEND_OFF
+ *    (relleno con un color de alfa 0/1, copias de textura sin mezcla);
+ *  - rsxkit_target_fill / _fill_rows: el alfa de la imagen (el bit de alfa
+ *    de RSXKIT_RGBA5551);
+ *  - rsxkit_target_copy: se copia el alfa si el origen también lo tiene.
+ * rsxkit_target_texture lo devuelve como RSXKIT_XRGB8888, cuyo alfa el 3D
+ * lee (el framebuffer 2D y rsxkit_target_present lo ignoran). Sin alfa, la
+ * lectura trae lo que el RSX deje en el byte alto de X8R8G8B8 (opaco).
+ * Un destino con alfa mezcla en cada dibujo (ONE / ZERO en los opacos):
+ * conviene para los que se leen como textura, no para el cuadro principal. */
+#define RSXKIT_TARGET_ALPHA 0x1u
 rsxkit_target *rsxkit_target_create(uint32_t width, uint32_t height);
+rsxkit_target *rsxkit_target_create_ex(uint32_t width, uint32_t height, uint32_t flags);
+int rsxkit_target_has_alpha(const rsxkit_target *t);
 void rsxkit_target_destroy(rsxkit_target *t);
 void rsxkit_target_size(const rsxkit_target *t, uint32_t *width, uint32_t *height);
 rsxkit_depth *rsxkit_depth_create(uint32_t width, uint32_t height);
@@ -282,7 +304,8 @@ void rsxkit_bind_frame(float lw, float lh);
 #define RSXKIT_CLEAR_COLOR 0x1u
 #define RSXKIT_CLEAR_DEPTH 0x2u
 /* Borra en el destino ligado el rectángulo lógico (x0, y0, x1, y1), o todo
- * si rect es NULL. depth en [0, 1]. */
+ * si rect es NULL. depth en [0, 1]. rgb es 0x00RRGGBB; en un destino con
+ * alfa (RSXKIT_TARGET_ALPHA) el byte alto es el alfa (0 si se deja en 0). */
 void rsxkit_clear(uint32_t flags, uint32_t rgb, float depth, const float rect[4]);
 
 /* Presenta en el cuadro en curso la región `src` del destino (píxeles del
@@ -373,8 +396,13 @@ enum { RSXKIT_K_T0, RSXKIT_K_T0A, RSXKIT_K_T1, RSXKIT_K_T1A, RSXKIT_K_ONE, RSXKI
 #define RSXKIT_K_TERMS   RSXKIT_FP_MAX_TERMS
 #define RSXKIT_K_FACTORS RSXKIT_FP_MAX_FACTORS
 
+/* rsxkit_draw.dst_alpha, solo en destinos con RSXKIT_TARGET_ALPHA. */
+#define RSXKIT_DSTA_ONE  0  /* los píxeles escritos quedan con alfa 1 */
+#define RSXKIT_DSTA_FRAG 1  /* con blend OFF: el alfa del fragmento; con mezcla, igual que ONE */
+
 typedef struct rsxkit_draw {
 	uint8_t blend;      /* rsxkit_blend */
+	uint8_t dst_alpha;  /* RSXKIT_DSTA_*: alfa que deja en un destino con alfa */
 	uint8_t cull;       /* rsxkit_cull */
 	uint8_t depth;      /* RSXKIT_DEPTH_* */
 	uint8_t alpha_ref;  /* 0: sin prueba de alfa; si no, pasa alfa >= ref/255 */
