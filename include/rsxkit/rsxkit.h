@@ -242,6 +242,16 @@ void rsxkit_target_destroy(rsxkit_target *t);
 void rsxkit_target_size(const rsxkit_target *t, uint32_t *width, uint32_t *height);
 rsxkit_depth *rsxkit_depth_create(uint32_t width, uint32_t height);
 void rsxkit_depth_destroy(rsxkit_depth *d);
+/* Carga en la profundidad `d` una imagen de w × h palabras de 32 bits de la
+ * memoria principal mapeada (offset alineado a 64, pitch múltiplo de 64):
+ * cada palabra es la profundidad de 24 bits en los altos y el stencil en el
+ * byte bajo (la misma disposición de Z24S8 que ve la CPU), agrandada `scale`
+ * veces sin filtro (copia de 32 bits del motor 2D: exacta). Va encolada
+ * entre esperas del RSX, así que lo dibujado antes no la ve y lo de después
+ * sí. Para la z que un juego deja en la memoria con la CPU. Deja sin ligar
+ * el destino: volver a rsxkit_bind. Devuelve 0 o RSXKIT_EARG. */
+int rsxkit_depth_load(rsxkit_depth *d, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
+		      uint32_t scale);
 
 /* Dibujar en t (y su profundidad d, que puede ser NULL) hasta otro
  * rsxkit_bind o rsxkit_frame_begin. Las coordenadas de los vértices y

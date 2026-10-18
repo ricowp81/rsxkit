@@ -177,6 +177,62 @@ void rsxkit_depth_destroy(rsxkit_depth *d)
 		rsxkit_bound.depth = NULL;
 }
 
+int rsxkit_depth_load(rsxkit_depth *d, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
+		      uint32_t scale)
+{
+	if (!d || !d->used || !w || !h || !scale || scale > 8 || (src_offset & 63) || (src_pitch & 63) ||
+	    src_pitch < w * 4 || w * scale > d->w || h * scale > d->h)
+		return RSXKIT_EARG;
+	struct rsxkit_state *g = &rsxkit_g;
+	/* Tramos de hasta 1024 píxeles de salida por lado (el motor de imagen
+	 * escalada no pasa de 2048) y de un múltiplo de 16 de entrada, para que
+	 * el offset de cada uno quede alineado a 64. */
+	uint32_t tw = (1024 / scale) & ~15u, th = 1024 / scale;
+	uint32_t tiles = ((w + tw - 1) / tw) * ((h + th - 1) / th);
+	rsxkit_reserve(32 + 40 * tiles);
+	/* Que el 3D termine con la profundidad antes de pisarla. */
+	rsxSetWaitForIdle(g->ctx);
+	rsxSetTransferScaleMode(g->ctx, GCM_TRANSFER_MAIN_TO_LOCAL, GCM_TRANSFER_SURFACE);
+	gcmTransferSurface surf;
+	memset(&surf, 0, sizeof surf);
+	surf.format = GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8;
+	surf.pitch = (u16)d->pitch;
+	surf.offset = d->offset;
+	for (uint32_t y = 0; y < h; y += th) {
+		uint32_t ih = h - y < th ? h - y : th;
+		for (uint32_t x = 0; x < w; x += tw) {
+			uint32_t iw = w - x < tw ? w - x : tw;
+			gcmTransferScale sc;
+			memset(&sc, 0, sizeof sc);
+			sc.conversion = GCM_TRANSFER_CONVERSION_TRUNCATE;
+			sc.format = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
+			sc.operation = GCM_TRANSFER_OPERATION_SRCCOPY;
+			sc.clipX = sc.outX = (s16)(x * scale);
+			sc.clipY = sc.outY = (s16)(y * scale);
+			sc.clipW = sc.outW = (u16)(iw * scale);
+			sc.clipH = sc.outH = (u16)(ih * scale);
+			/* Entrada por salida en 12.20, redondeada hacia arriba: con el
+			 * truncado (1/3 por debajo) el último píxel de cada grupo caería
+			 * en el texel anterior. */
+			sc.ratioX = (s32)((((uint64_t)iw << 20) + iw * scale - 1) / (iw * scale));
+			sc.ratioY = (s32)((((uint64_t)ih << 20) + ih * scale - 1) / (ih * scale));
+			sc.inW = (u16)iw;
+			sc.inH = (u16)ih;
+			sc.pitch = (u16)src_pitch;
+			sc.origin = GCM_TRANSFER_ORIGIN_CENTER;
+			sc.interp = GCM_TRANSFER_INTERPOLATOR_NEAREST;
+			sc.offset = src_offset + y * src_pitch + x * 4;
+			rsxSetTransferScaleSurface(g->ctx, &sc, &surf);
+		}
+	}
+	/* Y el 3D no empieza hasta que la copia terminó. */
+	rsxSetWaitForIdle(g->ctx);
+	rsxkit_bound.target = NULL;
+	rsxkit_bound.depth = NULL;
+	g->state_valid = 0;
+	return RSXKIT_OK;
+}
+
 void rsxkit_target_shutdown(void)
 {
 	for (int i = 0; i < TARGET_MAX; i++) {
