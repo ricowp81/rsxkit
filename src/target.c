@@ -178,10 +178,10 @@ void rsxkit_depth_destroy(rsxkit_depth *d)
 }
 
 int rsxkit_depth_load(rsxkit_depth *d, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
-		      uint32_t scale)
+		      uint32_t y0, uint32_t scale)
 {
 	if (!d || !d->used || !w || !h || !scale || scale > 8 || (src_offset & 63) || (src_pitch & 63) ||
-	    src_pitch < w * 4 || w * scale > d->w || h * scale > d->h)
+	    src_pitch < w * 4 || w * scale > d->w || (y0 + h) * scale > d->h)
 		return RSXKIT_EARG;
 	struct rsxkit_state *g = &rsxkit_g;
 	/* Tramos de hasta 1024 píxeles de salida por lado (el motor de imagen
@@ -208,7 +208,7 @@ int rsxkit_depth_load(rsxkit_depth *d, uint32_t src_offset, uint32_t src_pitch, 
 			sc.format = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
 			sc.operation = GCM_TRANSFER_OPERATION_SRCCOPY;
 			sc.clipX = sc.outX = (s16)(x * scale);
-			sc.clipY = sc.outY = (s16)(y * scale);
+			sc.clipY = sc.outY = (s16)((y0 + y) * scale);
 			sc.clipW = sc.outW = (u16)(iw * scale);
 			sc.clipH = sc.outH = (u16)(ih * scale);
 			/* Entrada por salida en 12.20, redondeada hacia arriba: con el
@@ -546,6 +546,40 @@ int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch
 	rsxkit_blit_to(src_offset, RSXKIT_MEM_MAIN, src_pitch, w, h, 0.0f, 0.0f, 1.0f, 1.0f, format, &full, t->w, t->h,
 		       RSXKIT_FILTER_NEAREST);
 	/* El estado 3D hay que volver a ponerlo: lo ligado sigue siendo t. */
+	rsxkit_g.state_valid = 0;
+	return RSXKIT_OK;
+}
+
+int rsxkit_target_fill_rows(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
+			    uint32_t y0, uint32_t y1, rsxkit_format format)
+{
+	if (!t || !t->used || !w || !h || y1 > h || y0 >= y1 || (unsigned)format >= RSXKIT_FORMAT_COUNT ||
+	    (src_offset & 127) || (src_pitch & 63))
+		return RSXKIT_EARG;
+	if (y0 == 0 && y1 == h)
+		return rsxkit_target_fill(t, src_offset, src_pitch, w, h, format);
+	if (rsxkit_blit_init() != RSXKIT_OK)
+		return RSXKIT_ENOMEM;
+	int rc = rsxkit_bind(t, NULL, (float)t->w, (float)t->h);
+	if (rc != RSXKIT_OK)
+		return rc;
+	gcmContextData *ctx = rsxkit_g.ctx;
+	rsxkit_reserve(RSXKIT_RESERVE_DRAW);
+	rsxkit_leave_3d();
+	rsxSetColorMask(ctx, GCM_COLOR_MASK_B | GCM_COLOR_MASK_G | GCM_COLOR_MASK_R | GCM_COLOR_MASK_A);
+	rsxSetDepthTestEnable(ctx, GCM_FALSE);
+	rsxSetDepthWriteEnable(ctx, GCM_FALSE);
+	rsxSetCullFaceEnable(ctx, GCM_FALSE);
+	rsxSetBlendEnable(ctx, GCM_FALSE);
+	rsxSetAlphaTestEnable(ctx, GCM_FALSE);
+	rsxInvalidateTextureCache(ctx, GCM_INVALIDATE_TEXTURE);
+	/* Las filas [y0, y1) de la imagen en las mismas filas del destino (a su
+	 * escala): el resto queda como estaba. */
+	uint32_t d0 = (uint32_t)((uint64_t)y0 * t->h / h), d1 = (uint32_t)(((uint64_t)y1 * t->h + h - 1) / h);
+	rsxkit_rect r = { 0, (int32_t)d0, t->w, d1 - d0 };
+	float v0 = (float)d0 * h / t->h / h, v1 = (float)d1 * h / t->h / h;
+	rsxkit_blit_to(src_offset, RSXKIT_MEM_MAIN, src_pitch, w, h, 0.0f, v0, 1.0f, v1, format, &r, t->w, t->h,
+		       RSXKIT_FILTER_NEAREST);
 	rsxkit_g.state_valid = 0;
 	return RSXKIT_OK;
 }

@@ -248,10 +248,11 @@ void rsxkit_depth_destroy(rsxkit_depth *d);
  * byte bajo (la misma disposición de Z24S8 que ve la CPU), agrandada `scale`
  * veces sin filtro (copia de 32 bits del motor 2D: exacta). Va encolada
  * entre esperas del RSX, así que lo dibujado antes no la ve y lo de después
- * sí. Para la z que un juego deja en la memoria con la CPU. Deja sin ligar
+ * sí. Las h filas van desde la fila y0 de la imagen (cargar solo las que
+ * cambiaron). Para la z que un juego deja en la memoria con la CPU. Deja sin ligar
  * el destino: volver a rsxkit_bind. Devuelve 0 o RSXKIT_EARG. */
 int rsxkit_depth_load(rsxkit_depth *d, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
-		      uint32_t scale);
+		      uint32_t y0, uint32_t scale);
 
 /* Dibujar en t (y su profundidad d, que puede ser NULL) hasta otro
  * rsxkit_bind o rsxkit_frame_begin. Las coordenadas de los vértices y
@@ -462,6 +463,11 @@ int rsxkit_target_copy(rsxkit_target *dst, const rsxkit_target *src);
  * Deja el destino ligado, sin profundidad: volver a rsxkit_bind con ella.
  * Devuelve 0, RSXKIT_EARG o RSXKIT_EDEPTH (como rsxkit_bind sin
  * profundidad). */
+/* Como rsxkit_target_fill, solo con las filas [y0, y1) de la imagen (en las
+ * mismas filas del destino, a su escala): para volver a cebar lo que se
+ * dibujó encima sin subir la imagen entera. */
+int rsxkit_target_fill_rows(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
+			    uint32_t y0, uint32_t y1, rsxkit_format format);
 int rsxkit_target_fill(rsxkit_target *t, uint32_t src_offset, uint32_t src_pitch, uint32_t w, uint32_t h,
 		       rsxkit_format format);
 
