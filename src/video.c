@@ -214,6 +214,7 @@ int rsxkit_init(const rsxkit_config *cfg)
 	memset(g, 0, sizeof *g);
 	g->fp_3d = -1;
 	g->host = memalign(1024 * 1024, host);
+	g->host_size = host;
 	if (!g->host || rsxInit(&g->ctx, cmd, host, g->host) != 0 || !g->ctx)
 		return RSXKIT_EINIT;
 	int rc = init_video(cfg);
@@ -422,4 +423,19 @@ const uint32_t *rsxkit_back_buffer(uint32_t *pitch_bytes)
 	if (pitch_bytes)
 		*pitch_bytes = rsxkit_g.color_pitch;
 	return rsxkit_g.color_buf[rsxkit_g.cur];
+}
+
+/* Diagnóstico: la dirección en memoria principal de un offset de E/S del
+ * búfer de comandos (el GET o el PUT del RSX), o NULL si cae fuera de la
+ * memoria mapeada. `avail` recibe cuántas palabras quedan hasta el final. */
+const uint32_t *rsxkit_cmd_at(uint32_t io_offset, uint32_t *avail)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	uint32_t base;
+	if (!g->host || rsxAddressToOffset(g->host, &base) != 0 || io_offset < base ||
+	    io_offset - base >= g->host_size || (io_offset & 3))
+		return NULL;
+	if (avail)
+		*avail = (g->host_size - (io_offset - base)) / 4;
+	return (const uint32_t *)((const uint8_t *)g->host + (io_offset - base));
 }

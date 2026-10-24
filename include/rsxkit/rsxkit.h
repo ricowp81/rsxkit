@@ -131,6 +131,9 @@ typedef struct rsxkit_wait_info {
 	bool done;            /* la espera terminó (solo si el gancho ya se había llamado) */
 } rsxkit_wait_info;
 
+/* Diagnóstico: palabras del búfer de comandos en un offset de E/S (GET/PUT). */
+const uint32_t *rsxkit_cmd_at(uint32_t io_offset, uint32_t *avail);
+
 /* El gancho se llama desde el hilo que espera, dentro de la llamada a
  * rsxkit que espera, cuando la espera pasa de `after_us` y después cada
  * `period_us` mientras siga, y una vez más al terminar (info->done). Sirve
