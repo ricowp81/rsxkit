@@ -185,8 +185,6 @@ typedef enum rsxkit_scale {
 typedef enum rsxkit_filter {
 	RSXKIT_FILTER_LINEAR,
 	RSXKIT_FILTER_NEAREST,
-	/* Dibujo 3D: tres muestras nearest del triángulo del texel. */
-	RSXKIT_FILTER_3POINT,
 } rsxkit_filter;
 
 typedef struct rsxkit_view {
@@ -351,9 +349,6 @@ typedef struct rsxkit_texture {
 	uint8_t remap;      /* rsxkit_remap: canales que se leen */
 	uint8_t pad[2];
 	float xf[4];
-	/* Solo RSXKIT_FILTER_3POINT: st → texel lógico (qf) y centro del texel
-	 * lógico → coordenada normalizada de la imagen física (sf). */
-	float qf[4], sf[4];
 } rsxkit_texture;
 
 /* Canales que lee una textura: los de su formato, o el rojo en los cuatro
@@ -417,9 +412,6 @@ typedef struct rsxkit_draw {
 	uint8_t ntex;       /* texturas: 0, 1 o 2 */
 	uint8_t fog;
 	uint8_t nterms;     /* 0: combinación lineal fija; si no, términos con `factors` */
-	uint8_t lod_levels; /* atlas explícito compartido por tex[0] y tex[1] */
-	uint8_t lod_wrap;   /* RSXKIT_WRAP_* común a los niveles */
-	uint16_t lod_base_height;
 	/* Distinto de 0: antes de los triángulos, sus aristas como líneas de
 	 * edges/8 píxeles de ancho de la superficie (modo de polígono LINE, un
 	 * poco más atrás en z) con el mismo estado. Los triángulos pintan
