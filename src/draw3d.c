@@ -504,11 +504,18 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	for (int i = 0; i < ntex; i++)
 		if (d->tex[i].filter == RSXKIT_FILTER_3POINT)
 			sample3 |= (uint8_t)(1u << i);
-	if (d->nterms || sample3) {
+	if (d->nterms || sample3 || d->lod_levels) {
 		rsxkit_fp_desc desc;
 		memset(&desc, 0, sizeof desc);
 		desc.ntex = (uint8_t)ntex;
 		desc.sample3 = sample3;
+		desc.lod_levels = d->lod_levels;
+		if (d->lod_levels) {
+			desc.lod_wrap = d->lod_wrap;
+			desc.lod_scale[0] = d->tex[0].width * rsxkit_bound.sx;
+			desc.lod_scale[1] = d->lod_base_height * rsxkit_bound.sy;
+			desc.lod_ratio = (float)d->lod_base_height / d->tex[0].height;
+		}
 		for (int i = 0; i < ntex; i++)
 			if (sample3 & (1u << i)) {
 				memcpy(desc.sample_xf[i], d->tex[i].sf, sizeof desc.sample_xf[i]);

@@ -414,6 +414,9 @@ typedef struct rsxkit_draw {
 	uint8_t ntex;       /* texturas: 0, 1 o 2 */
 	uint8_t fog;
 	uint8_t nterms;     /* 0: combinación lineal fija; si no, términos con `factors` */
+	uint8_t lod_levels; /* atlas explícito compartido por tex[0] y tex[1] */
+	uint8_t lod_wrap;   /* RSXKIT_WRAP_* común a los niveles */
+	uint16_t lod_base_height;
 	/* Distinto de 0: antes de los triángulos, sus aristas como líneas de
 	 * edges/8 píxeles de ancho de la superficie (modo de polígono LINE, un
 	 * poco más atrás en z) con el mismo estado. Los triángulos pintan

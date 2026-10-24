@@ -52,6 +52,7 @@ enum rsxkit_fp_factor {
 	RSXKIT_FP_T1A,       /* alfa de la textura 1, replicado */
 	RSXKIT_FP_C,         /* color del vértice (RGBA) */
 	RSXKIT_FP_CA,        /* alfa del vértice, replicado */
+	RSXKIT_FP_LOD,       /* fracción entre los dos niveles explícitos */
 	RSXKIT_FP_FACTORS
 };
 
@@ -67,6 +68,12 @@ typedef struct rsxkit_fp_desc {
 	uint8_t nterms;  /* 1..RSXKIT_FP_MAX_TERMS */
 	uint8_t sample3; /* bit i: textura i con filtro triangular de 3 puntos */
 	uint8_t term_mask; /* 0: todos; si no, términos presentes (bit j) */
+	uint8_t lod_levels; /* 0: normal; 2..8: atlas explícito en T0 y T1 */
+	uint8_t lod_wrap;   /* RSXKIT_WRAP_*; el atlas limita sus propios bordes */
+	uint8_t lod_pad[2];
+	/* Escala de dFdx/dFdy de TEXCOORD0.xy a texels por píxel lógico y
+	 * proporción alto-base/alto-atlas. */
+	float lod_scale[2], lod_ratio;
 	/* Por textura sample3: centro (x,y) en la rejilla lógica → coordenada
 	 * normalizada del sampler: (x*sx+bx, y*sy+by). */
 	float sample_xf[2][4];
@@ -89,10 +96,10 @@ typedef struct rsxkit_fp_info {
 /* Cada textura de 3 puntos necesita 3 TEX y 16 operaciones para formar las
  * coordenadas y los pesos. Las constantes inmediatas ocupan otras cuatro
  * palabras detrás de la instrucción que las usa. */
-#define RSXKIT_FP_MAX_INSNS (38 + RSXKIT_FP_MAX_TERMS * (RSXKIT_FP_MAX_FACTORS))
-/* Dos muestreadores: 4 palabras por instrucción y 14 constantes en línea
- * de otras 4; el combiner no usa constantes inmediatas. */
-#define RSXKIT_FP_MAX_WORDS (4 * RSXKIT_FP_MAX_INSNS + 14 * 4)
+#define RSXKIT_FP_MAX_INSNS (62 + RSXKIT_FP_MAX_TERMS * (RSXKIT_FP_MAX_FACTORS))
+/* Dos muestreadores: 4 palabras por instrucción y constantes en línea de
+ * otras 4; el combiner no usa constantes inmediatas. */
+#define RSXKIT_FP_MAX_WORDS (4 * RSXKIT_FP_MAX_INSNS + 40 * 4)
 
 /* Emite el programa de `d` en `words` (hasta `max_words` palabras, en el
  * orden natural). Devuelve el número de palabras escritas, o un negativo:

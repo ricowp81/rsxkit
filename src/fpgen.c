@@ -41,10 +41,15 @@
 #define OPC_ADD 0x03u
 #define OPC_MAD 0x04u
 #define OPC_MAX 0x09u
+#define OPC_MIN 0x08u
 #define OPC_SGE 0x0Bu
 #define OPC_FRC 0x10u
 #define OPC_FLR 0x11u
 #define OPC_TEX 0x17u
+#define OPC_DDX 0x15u
+#define OPC_DDY 0x16u
+#define OPC_LG2 0x1Cu
+#define OPC_EX2 0x1Du
 
 #define SRC_TEMP     0x0u
 #define SRC_INPUT    0x1u
@@ -158,7 +163,7 @@ static void insn(struct emit *e, uint32_t opc, int dst, int sat, int end, const 
 	emit_insn(e, opc, dst, dst >= 0, opc != OPC_TEX, sat, end, s0, s1, s2, unit, NULL);
 }
 
-static int factor_opnd(uint8_t f, uint8_t ntex, struct opnd *o)
+static int factor_opnd(uint8_t f, uint8_t ntex, uint8_t lod, struct opnd *o)
 {
 	switch (f) {
 	case RSXKIT_FP_T0:
@@ -189,6 +194,15 @@ static int factor_opnd(uint8_t f, uint8_t ntex, struct opnd *o)
 		o->half = 0;
 		o->neg = 0;
 		return 0;
+	case RSXKIT_FP_LOD:
+		if (!lod)
+			return RSXKIT_FP_EDESC;
+		o->type = SRC_TEMP;
+		o->index = 14;
+		o->swz = SWZ_XYZW;
+		o->half = 0;
+		o->neg = 0;
+		return 0;
 	default:
 		return RSXKIT_FP_EDESC;
 	}
@@ -210,6 +224,13 @@ static int desc_valid(const rsxkit_fp_desc *d)
 	if (d->ntex > 2 || d->nterms < 1 || d->nterms > RSXKIT_FP_MAX_TERMS ||
 	    d->sample3 & ~((1u << d->ntex) - 1u) || d->term_mask & ~((1u << d->nterms) - 1u))
 		return 0;
+	if (d->lod_levels && (d->lod_levels < 2 || d->lod_levels > 8 || d->ntex != 2 || d->sample3 ||
+			      d->lod_wrap > 3 || d->lod_scale[0] <= 0.0f || d->lod_scale[1] <= 0.0f ||
+			      d->lod_ratio <= 0.0f))
+		return 0;
+	if (!d->lod_levels && (d->lod_wrap || d->lod_scale[0] != 0.0f || d->lod_scale[1] != 0.0f ||
+				 d->lod_ratio != 0.0f))
+		return 0;
 	for (unsigned i = 0; i < 2; i++) {
 		if ((d->sample3 & (1u << i)) && (!d->sample_xf[i][0] || !d->sample_xf[i][1]))
 			return 0;
@@ -224,7 +245,7 @@ static int desc_valid(const rsxkit_fp_desc *d)
 			return 0;
 		for (int k = 0; k < n; k++) {
 			struct opnd o;
-			if (factor_opnd(d->factors[j][k], d->ntex, &o) != 0)
+			if (factor_opnd(d->factors[j][k], d->ntex, d->lod_levels, &o) != 0)
 				return 0;
 		}
 	}
@@ -312,6 +333,96 @@ static void sample3(struct emit *e, int unit, int dst, const float xf[4])
 	emit_insn(e, OPC_MAD, dst, 1, 1, 0, 0, &s2, &wc, &blend, 0, NULL);
 }
 
+/* Calcula rho con derivadas de TEXCOORD0, el nivel entero y la fracción
+ * lineal de la N64. Los niveles están apilados en un atlas de ancho base;
+ * ambas unidades leen el mismo atlas, una en L y otra en L+1. */
+static void sample_lod(struct emit *e, const rsxkit_fp_desc *d)
+{
+	static const float one[4] = { 1, 1, 1, 1 };
+	static const float zero[4] = { 0, 0, 0, 0 };
+	static const float half[4] = { .5f, .5f, .5f, .5f };
+	static const float two[4] = { 2, 2, 2, 2 };
+	static const float off[4] = { 0, 2, 0, 2 };
+	float deriv[4] = { d->lod_scale[0], d->lod_scale[1], d->lod_scale[0], d->lod_scale[1] };
+	float maxlev[4] = { d->lod_levels - 1.0f, d->lod_levels - 1.0f,
+			    d->lod_levels - 1.0f, d->lod_levels - 1.0f };
+	float map[4] = { 1, d->lod_ratio, 1, d->lod_ratio };
+	struct opnd q = input(IN_TC(0), SWZ_XYXY), c = constant(SWZ_XYZW, 0);
+	struct opnd dx = temp(3, 0, SWZ_XYZW, 0), dy = temp(4, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_DDX, 3, 0, 0, 0, 0, &q, &none, &none, 0, NULL);
+	emit_insn(e, OPC_MUL, 3, 0, 0, 0, 0, &dx, &c, &none, 0, deriv);
+	emit_insn(e, OPC_DDY, 4, 0, 0, 0, 0, &q, &none, &none, 0, NULL);
+	emit_insn(e, OPC_MUL, 4, 0, 0, 0, 0, &dy, &c, &none, 0, deriv);
+	struct opnd ndx = temp(3, 0, SWZ_XYZW, 1), ndy = temp(4, 0, SWZ_XYZW, 1);
+	emit_insn(e, OPC_MAX, 5, 0, 0, 0, 0, &dx, &ndx, &none, 0, NULL);
+	emit_insn(e, OPC_MAX, 6, 0, 0, 0, 0, &dy, &ndy, &none, 0, NULL);
+	struct opnd ax = temp(5, 0, SWZ_XYZW, 0), ay = temp(6, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_MAX, 7, 0, 0, 0, 0, &ax, &ay, &none, 0, NULL);
+	struct opnd rho = temp(7, 0, SWZ_XYZW, 0), rho_yx = temp(7, 0, 0xB1, 0);
+	emit_insn(e, OPC_MAX, 7, 0, 0, 0, 0, &rho, &rho_yx, &none, 0, NULL);
+	rho = temp(7, 0, 0x00, 0);
+	emit_insn(e, OPC_MAX, 7, 0, 0, 0, 0, &rho, &c, &none, 0, one);
+	emit_insn(e, OPC_LG2, 8, 0, 0, 0, 0, &rho, &none, &none, 0, NULL);
+	struct opnd level = temp(8, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_FLR, 8, 0, 0, 0, 0, &level, &none, &none, 0, NULL);
+	emit_insn(e, OPC_MIN, 8, 0, 0, 0, 0, &level, &c, &none, 0, maxlev);
+	struct opnd nlevel = temp(8, 0, SWZ_XYZW, 1);
+	emit_insn(e, OPC_EX2, 9, 0, 0, 0, 0, &nlevel, &none, &none, 0, NULL);
+	struct opnd scale = temp(9, 0, SWZ_XYZW, 0), noneg = constant(SWZ_XYZW, 1);
+	emit_insn(e, OPC_MAD, 14, 0, 0, 0, 0, &rho, &scale, &noneg, 0, one);
+	struct opnd frac = temp(14, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_MIN, 14, 0, 0, 0, 0, &frac, &c, &none, 0, one);
+	/* El sampler del atlas queda limitado: repetir o reflejar todo el atlas
+	 * mezclaría niveles. Normaliza primero las coordenadas dentro de la tile. */
+	if (d->lod_wrap == 0) {
+		emit_insn(e, OPC_MAX, 3, 0, 0, 0, 0, &q, &c, &none, 0, zero);
+		q = temp(3, 0, SWZ_XYZW, 0);
+		emit_insn(e, OPC_MIN, 3, 0, 0, 0, 0, &q, &c, &none, 0, one);
+	} else if (d->lod_wrap == 1) {
+		emit_insn(e, OPC_FRC, 3, 0, 0, 0, 0, &q, &none, &none, 0, NULL);
+	} else if (d->lod_wrap == 2) {
+		emit_insn(e, OPC_MUL, 3, 0, 0, 0, 0, &q, &c, &none, 0, half);
+		struct opnd z = temp(3, 0, SWZ_XYZW, 0);
+		emit_insn(e, OPC_FRC, 3, 0, 0, 0, 0, &z, &none, &none, 0, NULL);
+		emit_insn(e, OPC_MUL, 3, 0, 0, 0, 0, &z, &c, &none, 0, two);
+		z = temp(3, 0, SWZ_XYZW, 0);
+		struct opnd mone = constant(SWZ_XYZW, 1);
+		emit_insn(e, OPC_ADD, 3, 0, 0, 0, 0, &z, &mone, &none, 0, one);
+		z = temp(3, 0, SWZ_XYZW, 0);
+		struct opnd nz = temp(3, 0, SWZ_XYZW, 1);
+		emit_insn(e, OPC_MAX, 3, 0, 0, 0, 0, &z, &nz, &none, 0, NULL);
+		z = temp(3, 0, SWZ_XYZW, 1);
+		emit_insn(e, OPC_ADD, 3, 0, 0, 0, 0, &c, &z, &none, 0, one);
+	} else {
+		struct opnd nq = q;
+		nq.neg = 1;
+		emit_insn(e, OPC_MAX, 3, 0, 0, 0, 0, &q, &nq, &none, 0, NULL);
+		q = temp(3, 0, SWZ_XYZW, 0);
+		emit_insn(e, OPC_MIN, 3, 0, 0, 0, 0, &q, &c, &none, 0, one);
+	}
+	q = temp(3, 0, SWZ_XYZW, 0);
+	struct opnd nscale = temp(9, 0, SWZ_XYZW, 1);
+	emit_insn(e, OPC_ADD, 10, 0, 0, 0, 0, &c, &nscale, &none, 0, one);
+	struct opnd remain = temp(10, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_MUL, 11, 0, 0, 0, 0, &remain, &c, &none, 0, off);
+	struct opnd coord0 = temp(11, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_MAD, 11, 0, 0, 0, 0, &q, &scale, &coord0, 0, NULL);
+	emit_insn(e, OPC_MUL, 11, 0, 0, 0, 0, &coord0, &c, &none, 0, map);
+	emit_insn(e, OPC_TEX, H_TEX0, 1, 0, 0, 0, &coord0, &none, &none, 0, NULL);
+	emit_insn(e, OPC_ADD, 12, 0, 0, 0, 0, &level, &c, &none, 0, one);
+	struct opnd level1 = temp(12, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_MIN, 12, 0, 0, 0, 0, &level1, &c, &none, 0, maxlev);
+	level1 = temp(12, 0, SWZ_XYZW, 1);
+	emit_insn(e, OPC_EX2, 12, 0, 0, 0, 0, &level1, &none, &none, 0, NULL);
+	struct opnd scale1 = temp(12, 0, SWZ_XYZW, 0), nscale1 = temp(12, 0, SWZ_XYZW, 1);
+	emit_insn(e, OPC_ADD, 13, 0, 0, 0, 0, &c, &nscale1, &none, 0, one);
+	struct opnd coord1 = temp(13, 0, SWZ_XYZW, 0);
+	emit_insn(e, OPC_MUL, 13, 0, 0, 0, 0, &coord1, &c, &none, 0, off);
+	emit_insn(e, OPC_MAD, 13, 0, 0, 0, 0, &q, &scale1, &coord1, 0, NULL);
+	emit_insn(e, OPC_MUL, 13, 0, 0, 0, 0, &coord1, &c, &none, 0, map);
+	emit_insn(e, OPC_TEX, H_TEX1, 1, 0, 0, 0, &coord1, &none, &none, 1, NULL);
+}
+
 int rsxkit_fp_desc_canon(rsxkit_fp_desc *d)
 {
 	if (!desc_valid(d))
@@ -346,7 +457,9 @@ int rsxkit_fpgen_emit(const rsxkit_fp_desc *d, uint32_t *words, uint32_t max_wor
 		return RSXKIT_FP_EDESC;
 	struct emit e = { .w = words, .max = max_words };
 	struct opnd uv = input(IN_TC(0), SWZ_XYZW), uv2 = input(IN_TC(0), SWZ_ZWZW);
-	if (d->ntex >= 1) {
+	if (d->lod_levels) {
+		sample_lod(&e, d);
+	} else if (d->ntex >= 1) {
 		if (d->sample3 & 1)
 			sample3(&e, 0, H_TEX0, d->sample_xf[0]);
 		else
@@ -379,7 +492,7 @@ int rsxkit_fpgen_emit(const rsxkit_fp_desc *d, uint32_t *words, uint32_t max_wor
 		struct opnd f[RSXKIT_FP_MAX_FACTORS];
 		memset(f, 0, sizeof f);
 		for (int k = 0; k < n; k++)
-			factor_opnd(d->factors[j][k], d->ntex, &f[k]);
+			factor_opnd(d->factors[j][k], d->ntex, d->lod_levels, &f[k]);
 		if (n == 0) {
 			if (first)
 				insn(&e, OPC_MOV, dst, last, last, &x, &none, &none, 0);
