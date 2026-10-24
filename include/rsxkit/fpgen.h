@@ -65,7 +65,11 @@ enum rsxkit_fp_factor {
 typedef struct rsxkit_fp_desc {
 	uint8_t ntex;    /* texturas que muestrea: 0, 1 o 2 */
 	uint8_t nterms;  /* 1..RSXKIT_FP_MAX_TERMS */
-	uint8_t pad[2];
+	uint8_t sample3; /* bit i: textura i con filtro triangular de 3 puntos */
+	uint8_t term_mask; /* 0: todos; si no, términos presentes (bit j) */
+	/* Por textura sample3: centro (x,y) en la rejilla lógica → coordenada
+	 * normalizada del sampler: (x*sx+bx, y*sy+by). */
+	float sample_xf[2][4];
 	uint8_t factors[RSXKIT_FP_MAX_TERMS][RSXKIT_FP_MAX_FACTORS];
 } rsxkit_fp_desc;
 
@@ -82,10 +86,13 @@ typedef struct rsxkit_fp_info {
 	uint16_t pad;
 } rsxkit_fp_info;
 
-/* Instrucciones como máximo que emite un programa: 2 TEX + por término
- * hasta 3 MUL/MOV + 1 MAD. */
-#define RSXKIT_FP_MAX_INSNS (2 + RSXKIT_FP_MAX_TERMS * (RSXKIT_FP_MAX_FACTORS))
-#define RSXKIT_FP_MAX_WORDS (4 * RSXKIT_FP_MAX_INSNS)
+/* Cada textura de 3 puntos necesita 3 TEX y 16 operaciones para formar las
+ * coordenadas y los pesos. Las constantes inmediatas ocupan otras cuatro
+ * palabras detrás de la instrucción que las usa. */
+#define RSXKIT_FP_MAX_INSNS (38 + RSXKIT_FP_MAX_TERMS * (RSXKIT_FP_MAX_FACTORS))
+/* Dos muestreadores: 4 palabras por instrucción y 14 constantes en línea
+ * de otras 4; el combiner no usa constantes inmediatas. */
+#define RSXKIT_FP_MAX_WORDS (4 * RSXKIT_FP_MAX_INSNS + 14 * 4)
 
 /* Emite el programa de `d` en `words` (hasta `max_words` palabras, en el
  * orden natural). Devuelve el número de palabras escritas, o un negativo:

@@ -413,7 +413,7 @@ static void set_texture(int unit, const rsxkit_texture *t)
 	tex.offset = t->offset;
 	rsxLoadTexture(ctx, (u8)unit, &tex);
 	rsxTextureControl(ctx, (u8)unit, GCM_TRUE, 0 << 8, 12 << 8, GCM_TEXTURE_MAX_ANISO_1);
-	u8 filt = t->filter == RSXKIT_FILTER_NEAREST ? GCM_TEXTURE_NEAREST : GCM_TEXTURE_LINEAR;
+	u8 filt = t->filter == RSXKIT_FILTER_LINEAR ? GCM_TEXTURE_LINEAR : GCM_TEXTURE_NEAREST;
 	rsxTextureFilter(ctx, (u8)unit, 0, filt, filt, GCM_TEXTURE_CONVOLUTION_QUINCUNX);
 	rsxTextureWrapMode(ctx, (u8)unit, wrap_mode(t->wrap_s), wrap_mode(t->wrap_t), GCM_TEXTURE_CLAMP_TO_EDGE, 0,
 			   GCM_TEXTURE_ZFUNC_LESS, 0);
@@ -433,8 +433,11 @@ static void set_constants(const rsxkit_draw *d, const struct vprog *p)
 	c[0][0] = 2.0f / rsxkit_bound.lw;
 	c[0][1] = 2.0f / rsxkit_bound.lh;
 	for (int i = 0; i < 2; i++)
-		if (i < d->ntex)
+		if (i < d->ntex) {
 			memcpy(c[1 + i], d->tex[i].xf, sizeof c[1 + i]);
+			if (d->tex[i].filter == RSXKIT_FILTER_3POINT)
+				memcpy(c[1 + i], d->tex[i].qf, sizeof c[1 + i]);
+		}
 	memcpy(c[C_K], d->k, sizeof d->k);
 	if (d->fog) {
 		memcpy(c[C_FOG], d->fog_color, sizeof c[C_FOG]);
@@ -497,12 +500,34 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	const void *want = d3.fp[ntex];
 	const rsxFragmentProgram *hdr = d3.fp[ntex];
 	u32 offset = d3.fp_offset[ntex];
-	if (d->nterms) {
+	uint8_t sample3 = 0;
+	for (int i = 0; i < ntex; i++)
+		if (d->tex[i].filter == RSXKIT_FILTER_3POINT)
+			sample3 |= (uint8_t)(1u << i);
+	if (d->nterms || sample3) {
 		rsxkit_fp_desc desc;
 		memset(&desc, 0, sizeof desc);
 		desc.ntex = (uint8_t)ntex;
-		desc.nterms = d->nterms > RSXKIT_K_TERMS ? RSXKIT_K_TERMS : d->nterms;
-		memcpy(desc.factors, d->factors, sizeof desc.factors);
+		desc.sample3 = sample3;
+		for (int i = 0; i < ntex; i++)
+			if (sample3 & (1u << i)) {
+				memcpy(desc.sample_xf[i], d->tex[i].sf, sizeof desc.sample_xf[i]);
+			}
+		if (d->nterms) {
+			desc.nterms = d->nterms > RSXKIT_K_TERMS ? RSXKIT_K_TERMS : d->nterms;
+			memcpy(desc.factors, d->factors, sizeof desc.factors);
+		} else {
+			/* La combinación fija conserva sus posiciones X0..X4 aunque
+			 * falte la textura 1; term_mask omite esos términos. */
+			desc.nterms = 5;
+			desc.term_mask = ntex == 2 ? 0x1F : ntex == 1 ? 0x13 : 0x10;
+			desc.factors[0][0] = RSXKIT_FP_T0;
+			desc.factors[1][0] = RSXKIT_FP_T0A;
+			if (ntex == 2) {
+				desc.factors[2][0] = RSXKIT_FP_T1;
+				desc.factors[3][0] = RSXKIT_FP_T1A;
+			}
+		}
 		const struct rsxkit_fp_cached *fc = rsxkit_fp_lookup(&desc);
 		if (!fc)
 			return;  /* descripción inválida o sin memoria: no se dibuja */

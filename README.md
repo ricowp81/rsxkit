@@ -242,19 +242,23 @@ rsxkit_draw_triangles(&d, first, count);
 - Con `fog`, el color de niebla se suma al **primer término sin
   factores**: incluir uno (con `k` en cero si no hace falta para otra
   cosa).
-- `rsxkit_fp_desc` (`ntex`, `nterms`, `factors`) identifica el programa;
+- `rsxkit_fp_desc` (`ntex`, `nterms`, `factors` y el modo de muestreo) identifica el programa;
   la caché lo busca por hash de la descripción canónica (factores de cada
   término ordenados; el orden de los términos sí cuenta, porque fija qué
   `X_j` lee cada uno). Conviene que quien traduce ponga los términos en
   un orden canónico para que el mismo conjunto dé siempre el mismo
   programa. Un juego usa decenas de programas distintos; la caché guarda
-  128 en 96 KB de memoria local del RSX y, si se llena, espera al RSX y
+  128 en 160 KB de memoria local del RSX y, si se llena, espera al RSX y
   se vacía (`rsxkit_fp_stats.evictions`).
 - Costo: 1 instrucción por textura, 1 por término más 1 por factor
   adicional (y 1 más si el único factor es el color del vértice). Las
   operaciones van en fp16, como las de cgcomp. Cambiar de programa son
   ~20 palabras en el búfer de comandos; `rsxkit_fp_get_stats` cuenta
   programas, generaciones y cargas.
+- Una `rsxkit_texture` con `RSXKIT_FILTER_3POINT` usa tres lecturas nearest
+  y 16 operaciones para elegir y mezclar el triángulo del texel. `qf`
+  define la rejilla lógica y `sf` la lleva a la imagen física; así una
+  textura renderizada a escala interna conserva la rejilla original.
 - El codificador (`rsxkit_fpgen_emit`) no depende de PSL1GHT: compila en
   cualquier host y las pruebas unitarias de Salsa64 lo verifican con un
   intérprete del microcódigo anclado a programas compilados por cgcomp

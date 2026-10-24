@@ -182,6 +182,8 @@ typedef enum rsxkit_scale {
 typedef enum rsxkit_filter {
 	RSXKIT_FILTER_LINEAR,
 	RSXKIT_FILTER_NEAREST,
+	/* Dibujo 3D: tres muestras nearest del triángulo del texel. */
+	RSXKIT_FILTER_3POINT,
 } rsxkit_filter;
 
 typedef struct rsxkit_view {
@@ -346,6 +348,9 @@ typedef struct rsxkit_texture {
 	uint8_t remap;      /* rsxkit_remap: canales que se leen */
 	uint8_t pad[2];
 	float xf[4];
+	/* Solo RSXKIT_FILTER_3POINT: st → texel lógico (qf) y centro del texel
+	 * lógico → coordenada normalizada de la imagen física (sf). */
+	float qf[4], sf[4];
 } rsxkit_texture;
 
 /* Canales que lee una textura: los de su formato, o el rojo en los cuatro
