@@ -258,6 +258,7 @@ static void vertex(gcmContextData *ctx, float x, float y, float u, float v, uint
 
 void rsxkit_fb_draw(rsxkit_fb *fb, const rsxkit_view *view, rsxkit_rect *out)
 {
+	rsxkit_screen_texture_invalidate();
 	if (!fb || !fb->used || fb->slot < 0)
 		return;
 	static const rsxkit_view def = { RSXKIT_SCALE_FIT, RSXKIT_FILTER_LINEAR, 0.0f };

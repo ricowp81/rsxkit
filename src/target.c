@@ -321,6 +321,7 @@ int rsxkit_bind(rsxkit_target *t, rsxkit_depth *d, float lw, float lh)
 
 void rsxkit_bind_frame(float lw, float lh)
 {
+	rsxkit_screen_texture_invalidate();
 	/* Un destino que es el búfer trasero: no está en targets[], así que
 	 * nadie lo libera. */
 	static struct rsxkit_target frame;

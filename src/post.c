@@ -394,6 +394,7 @@ static int bind_output(struct rsxkit_surface *s, uint32_t *w, uint32_t *h)
 {
 	struct rsxkit_state *g = &rsxkit_g;
 	if (!s) {
+		rsxkit_screen_texture_invalidate();
 		if (!g->screen_bound)
 			rsxkit_bind_screen();
 		else

@@ -19,6 +19,36 @@
 
 struct rsxkit_state rsxkit_g;
 
+static uint64_t screen_ticket;
+static uint32_t screen_saved;
+static bool screen_saved_valid;
+
+void rsxkit_screen_texture_invalidate(void)
+{
+	if (screen_saved == rsxkit_g.cur)
+		screen_saved_valid = false;
+}
+
+uint64_t rsxkit_screen_texture(rsxkit_texture *out)
+{
+	struct rsxkit_state *g = &rsxkit_g;
+	memset(out, 0, sizeof *out);
+	out->offset = g->color_offset[g->cur];
+	out->pitch = g->color_pitch;
+	out->width = g->screen.width;
+	out->height = g->screen.height;
+	out->format = RSXKIT_XRGB8888;
+	out->location = RSXKIT_MEM_LOCAL;
+	screen_saved = g->cur;
+	screen_saved_valid = true;
+	return ++screen_ticket;
+}
+
+bool rsxkit_screen_texture_valid(uint64_t ticket)
+{
+	return screen_saved_valid && ticket == screen_ticket && screen_saved != rsxkit_g.cur;
+}
+
 static const int32_t default_modes[] = {
 	VIDEO_RESOLUTION_720, VIDEO_RESOLUTION_1080, VIDEO_RESOLUTION_480, VIDEO_RESOLUTION_576,
 };
@@ -124,6 +154,7 @@ static int init_video(const rsxkit_config *cfg)
 
 static void free_screen_buffers(void)
 {
+	screen_saved_valid = false;
 	struct rsxkit_state *g = &rsxkit_g;
 	for (int i = 0; i < 2; i++) {
 		if (g->color_buf[i])
@@ -306,6 +337,7 @@ void rsxkit_finish(void)
 
 void rsxkit_bind_screen(void)
 {
+	rsxkit_screen_texture_invalidate();
 	struct rsxkit_state *g = &rsxkit_g;
 	gcmSurface sf;
 	memset(&sf, 0, sizeof sf);
@@ -401,6 +433,7 @@ uint64_t rsxkit_vblank_count(void)
 
 int rsxkit_after_system(void)
 {
+	screen_saved_valid = false;
 	struct rsxkit_state *g = &rsxkit_g;
 	if (!g->ctx)
 		return 0;

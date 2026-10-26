@@ -463,3 +463,8 @@ se copió código). Las ranuras de imagen del 2D (`rsxkit_ui_image_set` y
 contribución de VIDEOGAMES SCZ, bajo MIT con su conformidad
 (2026-10-13). No contiene código de proyectos GPL ni de proyectos sin
 licencia clara.
+
+`rsxkit_screen_texture` presta como textura el búfer recién dibujado sin copiarlo.
+Su ticket más reciente debe pasar `rsxkit_screen_texture_valid` tras el flip;
+la UI, el redibujo y el sistema invalidan el préstamo. Quien escriba directamente
+en la pantalla llama antes a `rsxkit_screen_texture_invalidate`.
