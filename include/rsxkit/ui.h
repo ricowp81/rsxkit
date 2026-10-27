@@ -105,9 +105,10 @@ uint32_t rsxkit_ui_dropped(void);
 /* Atlas de la fuente: RGBA8888 (bytes R, G, B, A), blanco con el alfa de
  * los glifos al doble de tamaño y un bloque blanco opaco para los
  * rectángulos. Las coordenadas de textura de los vértices van en téxeles
- * del atlas. */
+ * del atlas. Caben 16 celdas por fila: el alto debe dar para todos los
+ * glifos de la fuente más el bloque blanco (22 filas = 352 celdas). */
 #define RSXKIT_UI_ATLAS_W 288
-#define RSXKIT_UI_ATLAS_H 392
+#define RSXKIT_UI_ATLAS_H 616
 void rsxkit_ui_atlas(uint8_t *rgba, uint32_t pitch);
 /* Sin RSX: el tamaño de la imagen de una ranura (lo que rsxkit_ui_image_set
  * avisa al subirla); sus coordenadas de textura van en téxeles de esa imagen. */
