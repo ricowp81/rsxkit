@@ -65,6 +65,20 @@ int rsxkit_map_main(void *ptr, uint32_t size, uint32_t *offset)
 	return RSXKIT_OK;
 }
 
+int rsxkit_unmap_main(void *ptr)
+{
+	for (unsigned i = 0; i < nmaps; i++)
+		if (maps[i].ea == ptr) {
+			/* Que el RSX termine lo que pudiera leer de ahí. */
+			rsxkit_finish();
+			if (gcmUnmapEaIoAddress(ptr) != 0)
+				return RSXKIT_EARG;
+			maps[i] = maps[--nmaps];
+			return RSXKIT_OK;
+		}
+	return RSXKIT_EARG;
+}
+
 int rsxkit_main_maps_bad(void)
 {
 	int bad = 0;

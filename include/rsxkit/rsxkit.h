@@ -226,6 +226,10 @@ rsxkit_rect rsxkit_layout(uint32_t width, uint32_t height, const rsxkit_view *vi
  * alineada a 1 MB, tamaño múltiplo de 1 MB) y da su offset. Vértices y
  * texturas pueden vivir ahí: los escribe la CPU o un SPE sin copiarlos. */
 int rsxkit_map_main(void *ptr, uint32_t size, uint32_t *offset);
+/* Deshace un rsxkit_map_main (la misma dirección) para poder liberar esa
+ * memoria: espera a que el RSX termine lo enviado. Devuelve 0 o
+ * RSXKIT_EARG (no estaba mapeada). */
+int rsxkit_unmap_main(void *ptr);
 
 /* Barrera: marca lo enviado hasta ahora; rsxkit_fence_done dice si el RSX
  * ya lo terminó y rsxkit_fence_wait lo espera. rsxkit_fence_done solo lee
