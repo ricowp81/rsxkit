@@ -329,10 +329,15 @@ for (;;) {
 
 | Función | Qué hace |
 |---|---|
-| `int rsxkit_ui_init(void)` | Reserva 3 MB de memoria principal mapeada al RSX: el atlas de la fuente, dos búferes de vértices que se turnan con una barrera y `RSXKIT_UI_IMAGES` ranuras de imagen. |
+| `int rsxkit_ui_init(void)` | Reserva 4 MB de memoria principal mapeada al RSX: el atlas (la 8x13 y la caché de glifos), dos búferes de vértices que se turnan con una barrera y `RSXKIT_UI_IMAGES` ranuras de imagen. |
 | `void rsxkit_ui_begin(lw, lh)` / `rsxkit_ui_end()` | Empieza el lote sobre la pantalla del cuadro (`rsxkit_bind_frame`) con espacio lógico `lw × lh` / lo envía. |
 | `rsxkit_ui_gradient(x, y, w, h, tl, tr, bl, br)` / `rsxkit_ui_rect(x, y, w, h, rgba)` | Rectángulo con un color por esquina / de un color. |
-| `float rsxkit_ui_text(x, y, utf8, scale, rgba, max_cells)` | Texto: a escala 1 cada carácter mide 8 × 13 unidades. Con `max_cells`, «…» al final si no cabe. Devuelve el ancho. |
+| `float rsxkit_ui_text(x, y, utf8, scale, rgba, max_cells)` | Texto: a escala 1 el renglón mide 13 unidades de alto; con la 8x13 cada carácter, 8 de ancho. Con `max_cells`, «…» al final si no cabe en `max_cells × 8 × scale`. Devuelve el ancho. |
+| `float rsxkit_ui_text_fit(x, y, utf8, scale, rgba, max_w)` | Igual, con el límite como ancho lógico. |
+| `float rsxkit_ui_text_width(utf8, scale)` / `rsxkit_ui_text_fit_width(utf8, scale, max_w)` | Ancho con la fuente en uso (con la 8x13, celdas × 8 × escala) / el que dibujaría `_fit` con ese límite (para alinear a la derecha). |
+| `size_t rsxkit_ui_text_wrap(utf8, scale, max_w, &next)` | Corte de línea: bytes del primer renglón que caben; corta en espacios o, en japonés, chino y coreano, entre caracteres (sin empezar renglón con la puntuación de cierre). |
+| `rsxkit_ui_font(const rsxkit_glyph_source *src)` | Fuente externa (proporcional) para todo el texto; `NULL`, la 8x13. Ver «Fuente externa» abajo. |
+| `rsxkit_ui_font_stats_get(&st)` | Estado de la caché de glifos (aciertos, rasterizados, reemplazos, diferidos, con la 8x13). |
 | `rsxkit_ui_wave(const rsxkit_wave *w, float t)` | Una onda a lo ancho: cresta de dos senos con línea brillante y lámina que se desvanece hacia abajo, en el instante `t`. |
 | `int rsxkit_ui_image_set(slot, rgba, w, h)` | Sube una imagen RGBA8888 (bytes R, G, B, A; hasta `RSXKIT_UI_IMAGE_MAX_W × _H`, 320 × 448) a una ranura (`RSXKIT_UI_IMAGES`, hoy 1). Espera a que el RSX termine los cuadros que la usan: se llama entre cuadros y rara vez (al cambiar de carátula). |
 | `rsxkit_ui_image(slot, x, y, w, h, rgba)` | Dibuja la imagen de la ranura estirada al rectángulo; `rgba` la tiñe y le da alfa (`0xFFFFFFFF` tal cual). Sin imagen subida, no dibuja nada. |
@@ -351,6 +356,54 @@ for (;;) {
   búfer de comandos.
 - La geometría no usa el RSX: con `rsxkit_ui_batch` y `rsxkit_ui_atlas` se
   arma en memoria propia, para pruebas y vistas previas en la PC.
+
+#### Fuente externa y caché de glifos
+
+`rsxkit_ui_font(src)` cambia la fuente de todo el texto del 2D por una que
+da glifos con `rsxkit_glyph_source.render`: rasteriza un carácter con
+cobertura de 8 bits en una caja de `RSXKIT_GLYPH_BOX` (26 × 26 téxeles, el
+renglón entero al doble) y devuelve su avance, dónde empieza la imagen y su
+ancho. Lo que la fuente no tiene (`render` < 0) se dibuja con la 8x13.
+
+- El atlas (512 × 952) guarda arriba a la izquierda la 8x13 y en el resto
+  `RSXKIT_UI_GLYPH_SLOTS` (392) casillas de 28 × 28 para los glifos
+  rasterizados. Una tabla de 2048 glifos conocidos guarda el avance aunque
+  la imagen salga del atlas: medir rasteriza cada carácter una sola vez.
+- Reemplazo: si no hay casilla libre, la usada hace más cuadros (LRU por
+  cuadro), nunca una usada en este cuadro o en el anterior, que el RSX puede
+  estar leyendo (`rsxkit_ui_begin` espera la barrera del de hace dos). No se
+  espera al RSX ni se corta el cuadro: lo que no cabe, o lo que pasa de 32
+  rasterizados por cuadro para volver al atlas, sale en el cuadro siguiente.
+- El texto proporcional cambia las cuentas de quien mide: usar
+  `rsxkit_ui_text_width`, `_fit` y `_wrap` en vez de celdas × 8.
+
+### Fuente del sistema de la PS3 (`rsxkit/sysfont.h`)
+
+Las fuentes del XMB (Rodin, NewRodin, YG para el coreano, DFHei5 para el
+chino) con los módulos del firmware libfont, FreeType y libfontFT. Se leen
+de `/dev_flash` en tiempo de ejecución: no van en el programa. Enlazar con
+`-lfontFT -lfont -lsysmodule`.
+
+```c
+#include <rsxkit/sysfont.h>
+
+if (rsxkit_sysfont_open(RSXKIT_SYSFONT_JAPANESE, 0) == RSXKIT_OK)
+	rsxkit_ui_font(rsxkit_sysfont_source());   /* si falla, sigue la 8x13 */
+...
+rsxkit_ui_font(NULL);
+rsxkit_sysfont_close();
+```
+
+| Función | Qué hace |
+|---|---|
+| `int rsxkit_sysfont_open(script, bold)` | Carga los módulos, inicia libfont (1 MB de caché de archivos) y abre el juego de fuentes de la escritura (`RSXKIT_SYSFONT_LATIN`, `_JAPANESE`, `_KOREAN`, `_TCHINESE`, `_SCHINESE`), probando del más completo («RODIN2», con Latin2) al más viejo. Otra llamada cambia de juego (vaciar la caché con `rsxkit_ui_font(NULL)` y volver a ponerla). |
+| `rsxkit_sysfont_source()` / `rsxkit_sysfont_has(cp)` | La fuente para `rsxkit_ui_font` / si dibuja un carácter. |
+| `rsxkit_sysfont_info_get(&info)` | Juego abierto, calibración, en qué paso y con qué código falló, memoria de libfont (actual y máxima). |
+| `rsxkit_sysfont_close()` | Cierra fuente, renderizador y biblioteca y descarga los módulos. |
+
+Los glifos salen a 22 píxeles por eme con la línea base en la fila 20 de la
+caja. Detalles, códigos de los juegos de fuentes y trampas de la API en las
+notas del RSX de Salsa64 (`docs/fuente-sistema.md`).
 - Hasta `RSXKIT_UI_MAX_QUADS` (4096) quads por cuadro; los de más se
   descartan y se cuentan (`rsxkit_ui_dropped`).
 
@@ -439,8 +492,12 @@ un componente).
 - Memoria local: 2 búferes de color + 1 de profundidad del tamaño de la
   pantalla (11 MB a 720p, 24 MB a 1080), `2 × max_w × max_h × 4` bytes por
   framebuffer y `w × h × 4` por destino y por profundidad.
-- Memoria principal mapeada: 3 MB si se usa `rsxkit_ui_init` (2 MB del
-  atlas y los vértices, más 576 KB por ranura de imagen redondeados a 64 KB).
+- Memoria principal mapeada: 4 MB si se usa `rsxkit_ui_init` (1,9 MB del
+  atlas con la caché de glifos, 1,5 MB de vértices y 576 KB por ranura de
+  imagen redondeados a 64 KB). La caché de glifos suma ~35 KB de `.bss`.
+- Fuente del sistema (`sysfont.h`): 1 MB de caché de archivos, lo que
+  libfont pida por sus funciones de memoria (el renderizador, hasta 1 MB) y
+  4 KB de superficie; todo se suelta con `rsxkit_sysfont_close`.
 - Posprocesado: lo que midan las superficies (`rsxkit_surface_bytes`) y una
   copia de cada programa (memoria local y principal). Vertex program
   `rsxkit_post.vcg` (atributos POSITION y TEXCOORD0..7, en modo inmediato).
@@ -461,8 +518,10 @@ regla de Scale2x/EPX, escrita aquí a partir de su descripción pública (no
 se copió código). Las ranuras de imagen del 2D (`rsxkit_ui_image_set` y
 `rsxkit_ui_image`, para las carátulas del menú de Salsa64) son una
 contribución de VIDEOGAMES SCZ, bajo MIT con su conformidad
-(2026-10-13). No contiene código de proyectos GPL ni de proyectos sin
-licencia clara.
+(2026-10-13). La fuente del sistema (`src/sysfont.c`) se escribió con las
+cabeceras de PSL1GHT (`font/font.h`, `font/fontFT.h`, `font/fontset.h`,
+MIT); las fuentes del firmware no se copian, se abren en la consola. No
+contiene código de proyectos GPL ni de proyectos sin licencia clara.
 
 `rsxkit_screen_texture` presta como textura el búfer recién dibujado sin copiarlo.
 Su ticket más reciente debe pasar `rsxkit_screen_texture_valid` tras el flip;

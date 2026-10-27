@@ -62,6 +62,7 @@ enum {
 	RSXKIT_ENOMEM = -3,    /* memoria local del RSX */
 	RSXKIT_EARG = -4,      /* argumento fuera de rango */
 	RSXKIT_EDEPTH = -5,    /* ninguna zeta cubre el destino (rsxkit_depth_reserve) */
+	RSXKIT_EFONT = -6,     /* la fuente del sistema: módulo, biblioteca o juego de fuentes (sysfont.h) */
 };
 
 typedef struct rsxkit_screen {

@@ -3,7 +3,10 @@
  * rsxkit — el 2D de rsxkit/ui.h en el RSX: memoria mapeada con el atlas y
  * dos búferes de vértices, y el lote dibujado sobre la pantalla del cuadro
  * con el 3D de draw3d.c (textura × color del vértice, mezcla alfa). La
- * geometría la arma ui_geom.c.
+ * geometría la arma ui_geom.c, que también escribe en el atlas los glifos
+ * nuevos de la fuente externa mientras arma el lote: el RSX los ve porque
+ * rsxkit_vertices invalida la caché de texturas en cada lote, después de la
+ * barrera de memoria de rsxkit_ui_end.
  */
 #include <malloc.h>
 #include <stdlib.h>
@@ -12,7 +15,7 @@
 #include "internal.h"
 #include "rsxkit/ui.h"
 
-#define UI_BYTES     (3u << 20)
+#define UI_BYTES     (4u << 20)
 #define ATLAS_PITCH  (RSXKIT_UI_ATLAS_W * 4)
 #define ATLAS_BYTES  ((ATLAS_PITCH * RSXKIT_UI_ATLAS_H + 0xFFFFu) & ~0xFFFFu)
 #define VB_CAP       (RSXKIT_UI_MAX_QUADS * 6)
@@ -143,6 +146,8 @@ void rsxkit_ui_end(void)
 		 * cada una son unas pocas palabras en el búfer de comandos. */
 		const uint32_t *first;
 		uint32_t groups = rsxkit_ui_groups(&first);
+		if (rsxkit_ui_atlas_dirty())
+			__sync_synchronize();  /* los glifos nuevos, antes de que el RSX lea */
 		rsxkit_vertices(ui.vb_off[ui.half], RSXKIT_MEM_MAIN);
 		for (uint32_t g = 0; g < groups; g++) {
 			uint32_t end = g + 1 < groups ? first[g + 1] : n;
