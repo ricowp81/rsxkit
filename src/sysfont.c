@@ -6,7 +6,7 @@
  * lib/rsxkit/README.md y en las notas del RSX del proyecto.
  *
  * Cómo sale un glifo: libfont lo dibuja con cobertura de 8 bits en una
- * superficie propia de 64 × 64 con la pluma en (PEN_X, PEN_Y); de ahí se
+ * superficie propia de 96 × 96 con la pluma en (PEN_X, PEN_Y); de ahí se
  * copia a la caja de ui.h el renglón alrededor de la línea base y las
  * columnas con tinta. Dónde cae la línea base en la superficie (si libfont
  * toma la y de la pluma como línea base o como tope del renglón) no se
@@ -23,7 +23,9 @@
  *    módulos con sysModuleLoad (sin módulo, el stub salta a basura).
  */
 #include <malloc.h>
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,9 +41,9 @@
 extern s32 fontSetScalePixel(font *f, f32 w, f32 h);
 
 #define FILE_CACHE  (1u << 20)
-#define SURF        64
-#define PEN_X       16
-#define PEN_Y       24
+#define SURF        96
+#define PEN_X       32
+#define PEN_Y       44
 #define BOX         RSXKIT_GLYPH_BOX
 #define ENTRIES     8
 
@@ -75,11 +77,30 @@ static struct {
 	font f;
 	fontRenderSurface surf;
 	int base;                 /* fila de la línea base en la superficie */
+	int mode;                 /* cómo llega la imagen a la superficie (MODE_*) */
 	rsxkit_glyph_source src;
 	rsxkit_sysfont_info info;
 } sf;
 
 static uint8_t surface[SURF * SURF] __attribute__((aligned(128)));
+
+/* Cómo deja libfont la imagen del glifo (se averigua al abrir con la «H»):
+ * escrita en la superficie; solo en su búfer, con fontImageTransInfo
+ * diciendo dónde va (se copia aquí); o con fontGenerateCharGlyph +
+ * fontGlyphRenderImage. */
+enum { MODE_SURFACE = 1, MODE_TRANSFER, MODE_GLYPH };
+
+/* Registro de la apertura, paso por paso, para el log. */
+static void trace(const char *fmt, ...)
+{
+	size_t n = strlen(sf.info.trace);
+	if (n + 2 >= sizeof sf.info.trace)
+		return;
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(sf.info.trace + n, sizeof sf.info.trace - n, fmt, ap);
+	va_end(ap);
+}
 
 /* ---- Memoria de libfont: con cabecera para saber el tamaño ---------------- */
 
@@ -177,6 +198,7 @@ static int start_library(void)
 {
 	for (; sf.modules < (int)(sizeof modules / sizeof modules[0]); sf.modules++) {
 		s32 rc = sysModuleLoad(modules[sf.modules]);
+		trace("módulo 0x%x=0x%08x ", modules[sf.modules], (unsigned)rc);
 		if (rc != 0)
 			return fail(1 + sf.modules, rc);
 	}
@@ -191,6 +213,7 @@ static int start_library(void)
 	cfg.userFontEntryMax = ENTRIES;
 	cfg.userFontEntries = sf.entries;
 	s32 rc = fontInit(&cfg);
+	trace("fontInit=0x%08x ", (unsigned)rc);
 	if (rc != 0)
 		return fail(5, rc);
 	fontLibraryConfigFT ft;
@@ -201,6 +224,7 @@ static int start_library(void)
 	ft.memoryIF.realloc_func = (fontReallocCallback)(uintptr_t)__get_opd32(f_realloc);
 	ft.memoryIF.calloc_func = (fontCallocCallback)(uintptr_t)__get_opd32(f_calloc);
 	rc = fontInitLibraryFreeType(&ft, &sf.lib);
+	trace("FreeType=0x%08x lib=%s ", (unsigned)rc, sf.lib ? "sí" : "NULL");
 	if (rc != 0 || !sf.lib) {
 		fontEnd();
 		return fail(6, rc);
@@ -214,19 +238,104 @@ static int start_library(void)
 	rcfg.bufferingPolicy.expandSize = 64u << 10;
 	rcfg.bufferingPolicy.resetSize = 256u << 10;
 	rc = fontCreateRenderer(sf.lib, &rcfg, &sf.renderer);
+	trace("renderer=0x%08x ", (unsigned)rc);
 	if (rc != 0)
 		return fail(7, rc);
 	sf.renderer_ready = 1;
 	return RSXKIT_OK;
 }
 
-/* Dibuja `cp` en la superficie (limpia). 0 o el código de libfont. */
-static s32 draw(uint32_t cp, fontGlyphMetrics *m)
+static int ink(int *max)
+{
+	int n = 0, mx = 0;
+	for (int i = 0; i < SURF * SURF; i++) {
+		n += surface[i] != 0;
+		if (surface[i] > mx)
+			mx = surface[i];
+	}
+	if (max)
+		*max = mx;
+	return n;
+}
+
+/* Copia la imagen que describe `ti` a la superficie: donde dice ti.surface
+ * si cae dentro, si no con las métricas (pluma en PEN_X, línea base en
+ * PEN_Y). 1 si copió algo. */
+static int transfer(const fontImageTransInfo *ti, const fontGlyphMetrics *m)
+{
+	if (!ti->image || !ti->imageWidth || !ti->imageHeight || ti->imageWidth > SURF || ti->imageHeight > SURF)
+		return 0;
+	uintptr_t base = (uintptr_t)surface, dst = (uint32_t)ti->surface;  /* puntero de 32 bits de la PRX */
+	long x0, y0;
+	if (dst >= base && dst < base + sizeof surface) {
+		x0 = (long)((dst - base) % SURF);
+		y0 = (long)((dst - base) / SURF);
+	} else {
+		x0 = PEN_X + (long)m->horizontal.bearingX;
+		y0 = PEN_Y - (long)m->horizontal.bearingY;
+	}
+	uint32_t pitch = ti->imageWidthByte ? ti->imageWidthByte : ti->imageWidth;
+	int any = 0;
+	for (uint32_t y = 0; y < ti->imageHeight; y++)
+		for (uint32_t x = 0; x < ti->imageWidth; x++) {
+			long sx = x0 + (long)x, sy = y0 + (long)y;
+			if (sx < 0 || sy < 0 || sx >= SURF || sy >= SURF)
+				continue;
+			uint8_t v = ti->image[y * pitch + x];
+			surface[sy * SURF + sx] = v;
+			any |= v != 0;
+		}
+	return any;
+}
+
+/* Dibuja `cp` en la superficie (limpia) con el modo `mode`. 0 o el código
+ * de libfont. Con `note`, anota lo que pasó (calibración). */
+static s32 draw_mode(uint32_t cp, fontGlyphMetrics *m, int mode, int note)
 {
 	fontImageTransInfo ti;
+	memset(&ti, 0, sizeof ti);
 	memset(surface, 0, sizeof surface);
 	memset(m, 0, sizeof *m);
-	return fontRenderCharGlyphImage(&sf.f, cp, &sf.surf, (f32)PEN_X, (f32)PEN_Y, m, &ti);
+	s32 rc;
+	if (mode == MODE_GLYPH) {
+		fontGlyph *g = NULL;
+		rc = fontGenerateCharGlyph(&sf.f, cp, &g);
+		if (note)
+			trace("[glifo gen=0x%08x", (unsigned)rc);
+		if (rc != 0 || !g)
+			return rc ? rc : -1;
+		fontGlyphStyle st;
+		memset(&st, 0, sizeof st);
+		st.Scale.widthPixel = st.Scale.heightPixel = RSXKIT_SYSFONT_PX;
+		rc = fontGlyphRenderImage(g, &st, &sf.renderer, &sf.surf, (f32)PEN_X, (f32)PEN_Y, m, &ti);
+		if (note)
+			trace(" render=0x%08x]", (unsigned)rc);
+		if (rc == 0 && !ink(NULL))
+			transfer(&ti, m);
+		fontDeleteGlyph(&sf.f, g);
+		return rc;
+	}
+	rc = fontRenderCharGlyphImage(&sf.f, cp, &sf.surf, (f32)PEN_X, (f32)PEN_Y, m, &ti);
+	if (note) {
+		int mx, n = ink(&mx);
+		trace("[render=0x%08x métricas %.1fx%.1f bx %.1f by %.1f av %.1f; tinta %d máx %d; trans img=%s %ux%u "
+		      "paso %u sup=%s]",
+		      (unsigned)rc, (double)m->width, (double)m->height, (double)m->horizontal.bearingX,
+		      (double)m->horizontal.bearingY, (double)m->horizontal.advance, n, mx, ti.image ? "sí" : "no",
+		      (unsigned)ti.imageWidth, (unsigned)ti.imageHeight, (unsigned)ti.imageWidthByte,
+		      !ti.surface ? "NULL"
+		      : (uint32_t)ti.surface >= (uintptr_t)surface && (uint32_t)ti.surface < (uintptr_t)surface + sizeof surface
+			      ? "dentro"
+			      : "fuera");
+	}
+	if (rc == 0 && mode == MODE_TRANSFER)
+		transfer(&ti, m);
+	return rc;
+}
+
+static s32 draw(uint32_t cp, fontGlyphMetrics *m)
+{
+	return draw_mode(cp, m, sf.mode, 0);
 }
 
 static int covered_raw(uint32_t cp);
@@ -234,43 +343,73 @@ static int covered_raw(uint32_t cp);
 static int open_type(uint32_t type)
 {
 	fontType t = { type, FONT_MAP_UNICODE };
+	memset(&sf.f, 0, sizeof sf.f);
 	s32 rc = fontOpenFontset(sf.lib, &t, &sf.f);
+	trace("| juego 0x%x: abrir=0x%08x ", (unsigned)type, (unsigned)rc);
 	if (rc != 0)
 		return fail(8, rc);
 	sf.font_open = 1;
-	fontSetResolutionDpi(&sf.f, 72, 72);
-	if ((rc = fontSetScalePixel(&sf.f, RSXKIT_SYSFONT_PX, RSXKIT_SYSFONT_PX)) != 0)
+	rc = fontSetResolutionDpi(&sf.f, 72, 72);
+	trace("dpi=0x%08x ", (unsigned)rc);
+	rc = fontSetScalePixel(&sf.f, RSXKIT_SYSFONT_PX, RSXKIT_SYSFONT_PX);
+	trace("escala=0x%08x ", (unsigned)rc);
+	if (rc != 0)
 		return fail(9, rc);
-	if ((rc = fontBindRenderer(&sf.f, &sf.renderer)) != 0)
+	rc = fontBindRenderer(&sf.f, &sf.renderer);
+	trace("ligar=0x%08x ", (unsigned)rc);
+	if (rc != 0)
 		return fail(10, rc);
 	sf.bound = 1;
-	if ((rc = fontSetupRenderScalePixel(&sf.f, RSXKIT_SYSFONT_PX, RSXKIT_SYSFONT_PX)) != 0)
+	rc = fontSetupRenderScalePixel(&sf.f, RSXKIT_SYSFONT_PX, RSXKIT_SYSFONT_PX);
+	trace("escala-render=0x%08x ", (unsigned)rc);
+	if (rc != 0)
 		return fail(11, rc);
 	fontHorizontalLayout lay;
 	memset(&lay, 0, sizeof lay);
-	if (fontGetHorizontalLayout(&sf.f, &lay) == 0) {
+	rc = fontGetHorizontalLayout(&sf.f, &lay);
+	trace("renglón=0x%08x (%.1f, base %.1f) ", (unsigned)rc, (double)lay.lineHeight, (double)lay.baseLineY);
+	if (rc == 0) {
 		sf.info.line_height = lay.lineHeight;
 		sf.info.baseline_y = lay.baseLineY;
 	}
 	fontRenderSurfaceInit(&sf.surf, surface, SURF, 1, SURF, SURF);
 	fontRenderSurfaceSetScissor(&sf.surf, 0, 0, SURF, SURF);
-	/* Calibración: la «H» se apoya en la línea base. */
+	/* Calibración: la «H» se apoya en la línea base. Se prueban los tres
+	 * modos hasta que uno deje tinta en la superficie. */
 	fontGlyphMetrics m;
-	if ((rc = draw('H', &m)) != 0)
-		return fail(12, rc);
-	int top = -1, bottom = -1;
-	for (int y = 0; y < SURF; y++)
-		for (int x = 0; x < SURF; x++)
-			if (surface[y * SURF + x] >= 0x80) {
-				if (top < 0)
-					top = y;
-				bottom = y;
-				break;
-			}
+	int top = -1, bottom = -1, mode;
+	s32 first = 0;
+	for (mode = MODE_SURFACE; mode <= MODE_GLYPH && top < 0; mode++) {
+		trace("modo %d ", mode);
+		rc = draw_mode('H', &m, mode, 1);
+		if (rc != 0) {
+			if (!first)
+				first = rc;
+			continue;
+		}
+		int mx;
+		ink(&mx);
+		int thr = mx >= 0x80 ? 0x80 : mx / 2 + 1;
+		for (int y = 0; y < SURF && mx; y++)
+			for (int x = 0; x < SURF; x++)
+				if (surface[y * SURF + x] >= thr) {
+					if (top < 0)
+						top = y;
+					bottom = y;
+					break;
+				}
+		if (top >= 0 && bottom - top < 6)
+			top = bottom = -1;
+		trace("H filas %d-%d ", top, bottom);
+		if (top >= 0)
+			break;
+	}
 	sf.info.cal_top = top;
 	sf.info.cal_bottom = bottom;
-	if (top < 0 || bottom - top < 6)
-		return fail(13, 0);
+	if (top < 0)
+		return first ? fail(12, first) : fail(13, 0);
+	sf.mode = mode;
+	sf.info.mode = mode;
 	sf.base = bottom + 1;
 	sf.info.id_check = covered_raw('A');
 	sf.info.type = type;
@@ -349,6 +488,7 @@ int rsxkit_sysfont_open(rsxkit_sysfont_script script, int bold)
 		return RSXKIT_EARG;
 	sf.info.step = 0;
 	sf.info.error = 0;
+	sf.info.trace[0] = '\0';
 	int rc;
 	if (!sf.renderer_ready && (rc = start_library()) != RSXKIT_OK) {
 		int step = sf.info.step;

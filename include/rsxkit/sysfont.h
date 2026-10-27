@@ -61,7 +61,11 @@ void rsxkit_sysfont_close(void);
 typedef struct rsxkit_sysfont_info {
 	int open;
 	uint32_t type;          /* CELL_FONT_TYPE_* del juego abierto */
-	int step;               /* en qué paso falló la última apertura (0: no falló) */
+	int step;               /* en qué paso falló la última apertura (0: no falló): 1–3 sysModuleLoad
+	                         * de FONT, FREETYPE y FONTFT; 4 caché; 5 fontInit; 6 FreeType; 7
+	                         * renderizador; 8 fontOpenFontset; 9 escala; 10 fontBindRenderer;
+	                         * 11 escala del render; 12 el dibujo de la «H» da error; 13 la «H»
+	                         * no deja tinta con ningún modo */
 	int32_t error;          /* el código del firmware de ese paso */
 	float line_height;      /* fontGetHorizontalLayout, en píxeles */
 	float baseline_y;
@@ -72,6 +76,8 @@ typedef struct rsxkit_sysfont_info {
 	uint32_t cache_bytes;   /* caché de archivos */
 	uint32_t glyphs;        /* glifos rasterizados */
 	uint32_t missing;       /* pedidos que la fuente no tenía */
+	int mode;               /* cómo llega la imagen: 1 superficie, 2 copia de fontImageTransInfo, 3 fontGlyphRenderImage */
+	char trace[1024];       /* la última apertura paso por paso, con los códigos del firmware */
 } rsxkit_sysfont_info;
 void rsxkit_sysfont_info_get(rsxkit_sysfont_info *info);
 

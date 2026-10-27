@@ -497,7 +497,7 @@ un componente).
   imagen redondeados a 64 KB). La caché de glifos suma ~35 KB de `.bss`.
 - Fuente del sistema (`sysfont.h`): 1 MB de caché de archivos, lo que
   libfont pida por sus funciones de memoria (el renderizador, hasta 1 MB) y
-  4 KB de superficie; todo se suelta con `rsxkit_sysfont_close`.
+  9 KB de superficie; todo se suelta con `rsxkit_sysfont_close`.
 - Posprocesado: lo que midan las superficies (`rsxkit_surface_bytes`) y una
   copia de cada programa (memoria local y principal). Vertex program
   `rsxkit_post.vcg` (atributos POSITION y TEXCOORD0..7, en modo inmediato).
