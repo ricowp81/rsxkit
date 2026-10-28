@@ -38,6 +38,11 @@ typedef struct rsxkit_config {
 	const int32_t *modes;    /* VIDEO_RESOLUTION_* en orden de preferencia;
 	                            NULL = 720p, 1080i/p, 480, 576 */
 	uint32_t num_modes;
+	/* No llamar a videoConfigure en rsxkit_init si la salida ya está en el
+	 * modo elegido (el del XMB): evita que algunos monitores renegocien el
+	 * HDMI. Experimental: sin videoConfigure no se fija el pitch del
+	 * búfer; si la imagen sale rota, no usarlo. */
+	int keep_mode;
 } rsxkit_config;
 
 /* Devuelve 0 o un código negativo (RSXKIT_E*). cfg puede ser NULL. */
@@ -71,6 +76,16 @@ typedef struct rsxkit_screen {
 } rsxkit_screen;
 
 const rsxkit_screen *rsxkit_screen_info(void);
+
+/* Lo que hizo rsxkit_init con el video, para el log y para esperar a que
+ * el monitor se recupere. */
+typedef struct rsxkit_video_boot {
+	int32_t prev_mode;        /* VIDEO_RESOLUTION_* que tenía la salida antes (-1: no se supo) */
+	int32_t mode;             /* el elegido */
+	int configured;           /* 1 si se llamó a videoConfigure, 0 si se conservó el modo */
+	uint64_t configured_us;   /* sysGetSystemTime() justo después de videoConfigure (0 si no) */
+} rsxkit_video_boot;
+const rsxkit_video_boot *rsxkit_video_boot_info(void);
 
 /* ---- Cuadro -------------------------------------------------------------- */
 

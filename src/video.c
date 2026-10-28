@@ -145,11 +145,41 @@ static int set_mode(int32_t id, const videoResolution *res)
 	return RSXKIT_OK;
 }
 
+static rsxkit_video_boot boot_info = { -1, -1, 0, 0 };
+
+const rsxkit_video_boot *rsxkit_video_boot_info(void)
+{
+	return &boot_info;
+}
+
 static int init_video(const rsxkit_config *cfg)
 {
 	videoResolution res;
 	int32_t id = pick_mode(cfg, &res);
-	return id < 0 ? RSXKIT_EVIDEO : set_mode(id, &res);
+	if (id < 0)
+		return RSXKIT_EVIDEO;
+	boot_info = (rsxkit_video_boot){ -1, id, 1, 0 };
+	videoState st;
+	bool same = false;
+	if (videoGetState(VIDEO_PRIMARY, 0, &st) == 0) {
+		boot_info.prev_mode = st.displayMode.resolution;
+		same = st.state == 0 && st.displayMode.resolution == id;
+	}
+	if (same && cfg && cfg->keep_mode) {
+		/* La superficie es la del modo; solo falta anotarla. */
+		boot_info.configured = 0;
+		int wide = id == VIDEO_RESOLUTION_720 || id == VIDEO_RESOLUTION_1080;
+		if (st.displayMode.aspect != VIDEO_ASPECT_AUTO)
+			wide = st.displayMode.aspect == VIDEO_ASPECT_16_9;
+		rsxkit_g.screen.width = res.width;
+		rsxkit_g.screen.height = res.height;
+		rsxkit_g.screen.aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
+		rsxkit_g.mode_id = id;
+		return RSXKIT_OK;
+	}
+	int rc = set_mode(id, &res);
+	boot_info.configured_us = sysGetSystemTime();
+	return rc;
 }
 
 static void free_screen_buffers(void)
