@@ -38,11 +38,15 @@ typedef struct rsxkit_config {
 	const int32_t *modes;    /* VIDEO_RESOLUTION_* en orden de preferencia;
 	                            NULL = 720p, 1080i/p, 480, 576 */
 	uint32_t num_modes;
-	/* No llamar a videoConfigure en rsxkit_init si la salida ya está en el
-	 * modo elegido (el del XMB): evita que algunos monitores renegocien el
-	 * HDMI. Experimental: sin videoConfigure no se fija el pitch del
-	 * búfer; si la imagen sale rota, no usarlo. */
-	int keep_mode;
+	/* Experimental, para monitores que renegocian el HDMI con cada
+	 * videoConfigure: si la salida ya está en el modo elegido (el del XMB),
+	 *  1 (A): videoConfigure con exactamente los valores vigentes
+	 *         (resolución, formato, aspecto y pitch de videoGetConfiguration);
+	 *  2 (B): sin videoConfigure.
+	 * En ambos los búferes de pantalla usan el pitch vigente. */
+	int same_mode;
+	/* Con same_mode: gcmUnbindTile de las regiones de mosaico que haya. */
+	int unbind_tiles;
 } rsxkit_config;
 
 /* Devuelve 0 o un código negativo (RSXKIT_E*). cfg puede ser NULL. */
@@ -84,6 +88,14 @@ typedef struct rsxkit_video_boot {
 	int32_t mode;             /* el elegido */
 	int configured;           /* 1 si se llamó a videoConfigure, 0 si se conservó el modo */
 	uint64_t configured_us;   /* sysGetSystemTime() justo después de videoConfigure (0 si no) */
+	/* Lo que había antes de configurar (videoGetState y videoGetConfiguration). */
+	int state_ok, state, color_space, scan_mode, conversion, aspect, refresh;
+	int cfg_ok, cfg_resolution, cfg_format, cfg_aspect;
+	uint32_t cfg_pitch;
+	uint32_t pitch;           /* el de nuestros búferes de color */
+	int same_mode;            /* lo que se aplicó: 0 nada, 1 A, 2 B */
+	int tiles_active, tiles_unbound;
+	char tiles[160];          /* las regiones de mosaico con algo (índice:tile/límite/pitch) */
 } rsxkit_video_boot;
 const rsxkit_video_boot *rsxkit_video_boot_info(void);
 

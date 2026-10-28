@@ -8,6 +8,7 @@
  * profundidad en la memoria local del RSX, flip en vsync.
  */
 #include <malloc.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/systime.h>
 #include <sysutil/video.h>
@@ -122,8 +123,11 @@ static int32_t pick_mode(const rsxkit_config *cfg, videoResolution *res)
 }
 
 /* videoConfigure del modo `id` y la superficie de salida resultante. */
+static uint32_t pitch_override;  /* pitch vigente del XMB (same_mode), 0 = el nuestro */
+
 static int set_mode(int32_t id, const videoResolution *res)
 {
+	pitch_override = 0;
 	videoConfiguration vc;
 	memset(&vc, 0, sizeof vc);
 	vc.resolution = (u8)id;
@@ -145,11 +149,28 @@ static int set_mode(int32_t id, const videoResolution *res)
 	return RSXKIT_OK;
 }
 
-static rsxkit_video_boot boot_info = { -1, -1, 0, 0 };
-
+static rsxkit_video_boot boot_info = { .prev_mode = -1, .mode = -1 };
 const rsxkit_video_boot *rsxkit_video_boot_info(void)
 {
 	return &boot_info;
+}
+
+/* Regiones de mosaico (tiles) con algo puesto; con `unbind`, las quita. */
+static void scan_tiles(int unbind)
+{
+	const gcmTileInfo *ti = gcmGetTileInfo();
+	size_t n = 0;
+	boot_info.tiles[0] = '\0';
+	for (int i = 0; ti && i < 15; i++) {
+		if (!ti[i].tile && !ti[i].limit && !ti[i].pitch)
+			continue;
+		boot_info.tiles_active++;
+		if (n + 40 < sizeof boot_info.tiles)
+			n += (size_t)snprintf(boot_info.tiles + n, sizeof boot_info.tiles - n, "%d:%x/%x/%x ", i,
+					      (unsigned)ti[i].tile, (unsigned)ti[i].limit, (unsigned)ti[i].pitch);
+		if (unbind && gcmUnbindTile((u8)i) == 0)
+			boot_info.tiles_unbound++;
+	}
 }
 
 static int init_video(const rsxkit_config *cfg)
@@ -158,19 +179,53 @@ static int init_video(const rsxkit_config *cfg)
 	int32_t id = pick_mode(cfg, &res);
 	if (id < 0)
 		return RSXKIT_EVIDEO;
-	boot_info = (rsxkit_video_boot){ -1, id, 1, 0 };
+	memset(&boot_info, 0, sizeof boot_info);
+	boot_info.prev_mode = -1;
+	boot_info.mode = id;
+	boot_info.configured = 1;
+	pitch_override = 0;
 	videoState st;
-	bool same = false;
 	if (videoGetState(VIDEO_PRIMARY, 0, &st) == 0) {
+		boot_info.state_ok = 1;
 		boot_info.prev_mode = st.displayMode.resolution;
-		same = st.state == 0 && st.displayMode.resolution == id;
+		boot_info.state = st.state;
+		boot_info.color_space = st.colorSpace;
+		boot_info.scan_mode = st.displayMode.scanMode;
+		boot_info.conversion = st.displayMode.conversion;
+		boot_info.aspect = st.displayMode.aspect;
+		boot_info.refresh = st.displayMode.refreshRates;
 	}
-	if (same && cfg && cfg->keep_mode) {
-		/* La superficie es la del modo; solo falta anotarla. */
-		boot_info.configured = 0;
+	videoConfiguration cur;
+	memset(&cur, 0, sizeof cur);
+	if (videoGetConfiguration(VIDEO_PRIMARY, &cur, NULL) == 0) {
+		boot_info.cfg_ok = 1;
+		boot_info.cfg_resolution = cur.resolution;
+		boot_info.cfg_format = cur.format;
+		boot_info.cfg_aspect = cur.aspect;
+		boot_info.cfg_pitch = cur.pitch;
+	}
+	scan_tiles(0);
+	int mode = cfg ? cfg->same_mode : 0;
+	if (mode && boot_info.cfg_ok && boot_info.cfg_resolution == id && cur.pitch >= res.width * 4) {
+		if (cfg->unbind_tiles) {
+			boot_info.tiles_active = 0;
+			scan_tiles(1);
+		}
+		pitch_override = cur.pitch;
+		boot_info.same_mode = mode;
+		int rc = RSXKIT_OK;
+		if (mode == 1) {
+			videoConfiguration vc = cur;
+			rc = videoConfigure(VIDEO_PRIMARY, &vc, NULL, 0) == 0 ? RSXKIT_OK : RSXKIT_EVIDEO;
+			boot_info.configured_us = (uint64_t)sysGetSystemTime();
+		} else {
+			boot_info.configured = 0;
+		}
+		if (rc != RSXKIT_OK)
+			return rc;
 		int wide = id == VIDEO_RESOLUTION_720 || id == VIDEO_RESOLUTION_1080;
-		if (st.displayMode.aspect != VIDEO_ASPECT_AUTO)
-			wide = st.displayMode.aspect == VIDEO_ASPECT_16_9;
+		if (boot_info.aspect != VIDEO_ASPECT_AUTO)
+			wide = boot_info.aspect == VIDEO_ASPECT_16_9;
 		rsxkit_g.screen.width = res.width;
 		rsxkit_g.screen.height = res.height;
 		rsxkit_g.screen.aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
@@ -178,7 +233,7 @@ static int init_video(const rsxkit_config *cfg)
 		return RSXKIT_OK;
 	}
 	int rc = set_mode(id, &res);
-	boot_info.configured_us = sysGetSystemTime();
+	boot_info.configured_us = (uint64_t)sysGetSystemTime();
 	return rc;
 }
 
@@ -221,7 +276,8 @@ static int alloc_screen_buffers(void)
 {
 	struct rsxkit_state *g = &rsxkit_g;
 	uint32_t w = g->screen.width, h = g->screen.height;
-	g->color_pitch = w * 4;
+	g->color_pitch = pitch_override ? pitch_override : w * 4;
+	boot_info.pitch = g->color_pitch;
 	for (int i = 0; i < 2; i++) {
 		g->color_buf[i] = rsxMemalign(64, h * g->color_pitch);
 		if (!g->color_buf[i])
