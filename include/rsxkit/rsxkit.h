@@ -38,15 +38,6 @@ typedef struct rsxkit_config {
 	const int32_t *modes;    /* VIDEO_RESOLUTION_* en orden de preferencia;
 	                            NULL = 720p, 1080i/p, 480, 576 */
 	uint32_t num_modes;
-	/* Experimental, para monitores que renegocian el HDMI con cada
-	 * videoConfigure: si la salida ya está en el modo elegido (el del XMB),
-	 *  1 (A): videoConfigure con exactamente los valores vigentes
-	 *         (resolución, formato, aspecto y pitch de videoGetConfiguration);
-	 *  2 (B): sin videoConfigure.
-	 * En ambos los búferes de pantalla usan el pitch vigente. */
-	int same_mode;
-	/* Con same_mode: gcmUnbindTile de las regiones de mosaico que haya. */
-	int unbind_tiles;
 } rsxkit_config;
 
 /* Devuelve 0 o un código negativo (RSXKIT_E*). cfg puede ser NULL. */
@@ -82,7 +73,12 @@ typedef struct rsxkit_screen {
 const rsxkit_screen *rsxkit_screen_info(void);
 
 /* Lo que hizo rsxkit_init con el video, para el log y para esperar a que
- * el monitor se recupere. */
+ * el monitor se recupere. Si la salida ya está en el modo elegido (el del
+ * XMB), videoConfigure lleva exactamente la configuración vigente (formato,
+ * aspecto y pitch de videoGetConfiguration, que en la PS3 es 8192 a 1080p
+ * y no ancho × 4) y los búferes de pantalla usan ese pitch: así el monitor
+ * no renegocia el HDMI por segunda vez. Con otro modo, la configuración de
+ * siempre. */
 typedef struct rsxkit_video_boot {
 	int32_t prev_mode;        /* VIDEO_RESOLUTION_* que tenía la salida antes (-1: no se supo) */
 	int32_t mode;             /* el elegido */
@@ -93,8 +89,8 @@ typedef struct rsxkit_video_boot {
 	int cfg_ok, cfg_resolution, cfg_format, cfg_aspect;
 	uint32_t cfg_pitch;
 	uint32_t pitch;           /* el de nuestros búferes de color */
-	int same_mode;            /* lo que se aplicó: 0 nada, 1 A, 2 B */
-	int tiles_active, tiles_unbound;
+	int used_current;         /* 1 si videoConfigure llevó los valores vigentes (formato, aspecto, pitch) */
+	int tiles_active;
 	char tiles[160];          /* las regiones de mosaico con algo (índice:tile/límite/pitch) */
 } rsxkit_video_boot;
 const rsxkit_video_boot *rsxkit_video_boot_info(void);

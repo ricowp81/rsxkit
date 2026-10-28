@@ -123,7 +123,7 @@ static int32_t pick_mode(const rsxkit_config *cfg, videoResolution *res)
 }
 
 /* videoConfigure del modo `id` y la superficie de salida resultante. */
-static uint32_t pitch_override;  /* pitch vigente del XMB (same_mode), 0 = el nuestro */
+static uint32_t pitch_override;  /* pitch vigente del XMB (init_video), 0 = el nuestro */
 
 static int set_mode(int32_t id, const videoResolution *res)
 {
@@ -155,8 +155,8 @@ const rsxkit_video_boot *rsxkit_video_boot_info(void)
 	return &boot_info;
 }
 
-/* Regiones de mosaico (tiles) con algo puesto; con `unbind`, las quita. */
-static void scan_tiles(int unbind)
+/* Regiones de mosaico (tiles) con algo puesto, para el log. */
+static void scan_tiles(void)
 {
 	const gcmTileInfo *ti = gcmGetTileInfo();
 	size_t n = 0;
@@ -168,8 +168,6 @@ static void scan_tiles(int unbind)
 		if (n + 40 < sizeof boot_info.tiles)
 			n += (size_t)snprintf(boot_info.tiles + n, sizeof boot_info.tiles - n, "%d:%x/%x/%x ", i,
 					      (unsigned)ti[i].tile, (unsigned)ti[i].limit, (unsigned)ti[i].pitch);
-		if (unbind && gcmUnbindTile((u8)i) == 0)
-			boot_info.tiles_unbound++;
 	}
 }
 
@@ -204,25 +202,16 @@ static int init_video(const rsxkit_config *cfg)
 		boot_info.cfg_aspect = cur.aspect;
 		boot_info.cfg_pitch = cur.pitch;
 	}
-	scan_tiles(0);
-	int mode = cfg ? cfg->same_mode : 0;
-	if (mode && boot_info.cfg_ok && boot_info.cfg_resolution == id && cur.pitch >= res.width * 4) {
-		if (cfg->unbind_tiles) {
-			boot_info.tiles_active = 0;
-			scan_tiles(1);
-		}
+	scan_tiles();
+	if (boot_info.cfg_ok && cur.resolution == id && cur.pitch >= res.width * 4 && cur.format == VIDEO_BUFFER_FORMAT_XRGB) {
+		/* Los mismos valores que dejó el XMB: un cambio real de formato,
+		 * aspecto o pitch hace que el monitor renegocie el HDMI. */
+		videoConfiguration vc = cur;
+		if (videoConfigure(VIDEO_PRIMARY, &vc, NULL, 0) != 0)
+			return RSXKIT_EVIDEO;
+		boot_info.configured_us = (uint64_t)sysGetSystemTime();
 		pitch_override = cur.pitch;
-		boot_info.same_mode = mode;
-		int rc = RSXKIT_OK;
-		if (mode == 1) {
-			videoConfiguration vc = cur;
-			rc = videoConfigure(VIDEO_PRIMARY, &vc, NULL, 0) == 0 ? RSXKIT_OK : RSXKIT_EVIDEO;
-			boot_info.configured_us = (uint64_t)sysGetSystemTime();
-		} else {
-			boot_info.configured = 0;
-		}
-		if (rc != RSXKIT_OK)
-			return rc;
+		boot_info.used_current = 1;
 		int wide = id == VIDEO_RESOLUTION_720 || id == VIDEO_RESOLUTION_1080;
 		if (boot_info.aspect != VIDEO_ASPECT_AUTO)
 			wide = boot_info.aspect == VIDEO_ASPECT_16_9;
