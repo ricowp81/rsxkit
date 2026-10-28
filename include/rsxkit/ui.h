@@ -51,7 +51,7 @@ extern "C" {
 #endif
 
 #define RSXKIT_UI_MAX_QUADS  4096
-#define RSXKIT_UI_IMAGES      1    /* ranuras de imagen (carátulas) */
+#define RSXKIT_UI_IMAGES      2    /* ranuras de imagen (carátulas, íconos) */
 #define RSXKIT_UI_IMAGE_MAX_W 320  /* tamaño máximo de una imagen subida */
 #define RSXKIT_UI_IMAGE_MAX_H 448
 #define RSXKIT_UI_MAX_GROUPS 1024  /* llamadas al RSX por cuadro; las de más van juntas */
@@ -121,6 +121,10 @@ void rsxkit_ui_wave(const rsxkit_wave *w, float t);
  * cual, 0xFFFFFF80 = a media opacidad). Devuelve 0 o un código de rsxkit. */
 int rsxkit_ui_image_set(int slot, const uint8_t *rgba, uint32_t w, uint32_t h);
 void rsxkit_ui_image(int slot, float x, float y, float w, float h, uint32_t rgba);
+/* Como rsxkit_ui_image, pero solo el rectángulo (sx, sy, sw, sh) de la
+ * imagen, en píxeles: varias figuras en una misma ranura (un atlas). */
+void rsxkit_ui_image_part(int slot, float x, float y, float w, float h, float sx, float sy, float sw, float sh,
+			  uint32_t rgba);
 
 /* Quads descartados desde el arranque (no cupieron en un cuadro). */
 uint32_t rsxkit_ui_dropped(void);

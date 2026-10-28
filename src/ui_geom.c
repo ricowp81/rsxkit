@@ -257,16 +257,23 @@ void rsxkit_ui_gradient(float x, float y, float w, float h, uint32_t tl, uint32_
 
 void rsxkit_ui_image(int slot, float x, float y, float w, float h, uint32_t rgba)
 {
+	if (slot < 0 || slot >= RSXKIT_UI_IMAGES)
+		return;
+	rsxkit_ui_image_part(slot, x, y, w, h, 0.0f, 0.0f, (float)b.img_w[slot], (float)b.img_h[slot], rgba);
+}
+
+void rsxkit_ui_image_part(int slot, float x, float y, float w, float h, float sx, float sy, float sw, float sh,
+			  uint32_t rgba)
+{
 	if (slot < 0 || slot >= RSXKIT_UI_IMAGES || !b.img_w[slot] || !b.img_h[slot] || w <= 0.0f || h <= 0.0f ||
-	    !(rgba & 0xFF))
+	    sw <= 0.0f || sh <= 0.0f || !(rgba & 0xFF))
 		return;
 	if (b.ngroups + 1 >= RSXKIT_UI_MAX_GROUPS) {  /* el último grupo no puede quedar de imagen */
 		b.dropped++;
 		return;
 	}
-	const float iw = (float)b.img_w[slot], ih = (float)b.img_h[slot];
 	const float p[4][2] = { { x, y }, { x + w, y }, { x, y + h }, { x + w, y + h } };
-	const float st[4][2] = { { 0.0f, 0.0f }, { iw, 0.0f }, { 0.0f, ih }, { iw, ih } };
+	const float st[4][2] = { { sx, sy }, { sx + sw, sy }, { sx, sy + sh }, { sx + sw, sy + sh } };
 	const uint32_t c[4] = { rgba, rgba, rgba, rgba };
 	new_group();
 	b.group_img[b.ngroups - 1] = (uint8_t)(slot + 1);

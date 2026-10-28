@@ -330,7 +330,7 @@ for (;;) {
 
 | Función | Qué hace |
 |---|---|
-| `int rsxkit_ui_init(void)` | Reserva 4 MB de memoria principal mapeada al RSX: el atlas (la 8x13 y la caché de glifos), dos búferes de vértices que se turnan con una barrera y `RSXKIT_UI_IMAGES` ranuras de imagen. |
+| `int rsxkit_ui_init(void)` | Reserva 5 MB de memoria principal mapeada al RSX: el atlas (la 8x13 y la caché de glifos), dos búferes de vértices que se turnan con una barrera y `RSXKIT_UI_IMAGES` ranuras de imagen. |
 | `void rsxkit_ui_begin(lw, lh)` / `rsxkit_ui_end()` | Empieza el lote sobre la pantalla del cuadro (`rsxkit_bind_frame`) con espacio lógico `lw × lh` / lo envía. |
 | `rsxkit_ui_gradient(x, y, w, h, tl, tr, bl, br)` / `rsxkit_ui_rect(x, y, w, h, rgba)` | Rectángulo con un color por esquina / de un color. |
 | `float rsxkit_ui_text(x, y, utf8, scale, rgba, max_cells)` | Texto: a escala 1 el renglón mide 13 unidades de alto; con la 8x13 cada carácter, 8 de ancho. Con `max_cells`, «…» al final si no cabe en `max_cells × 8 × scale`. Devuelve el ancho. |
@@ -340,8 +340,9 @@ for (;;) {
 | `rsxkit_ui_font(const rsxkit_glyph_source *src)` | Fuente externa (proporcional) para todo el texto; `NULL`, la 8x13. Ver «Fuente externa» abajo. |
 | `rsxkit_ui_font_stats_get(&st)` | Estado de la caché de glifos (aciertos, rasterizados, reemplazos, diferidos, con la 8x13). |
 | `rsxkit_ui_wave(const rsxkit_wave *w, float t)` | Una onda a lo ancho: cresta de dos senos con línea brillante y lámina que se desvanece hacia abajo, en el instante `t`. |
-| `int rsxkit_ui_image_set(slot, rgba, w, h)` | Sube una imagen RGBA8888 (bytes R, G, B, A; hasta `RSXKIT_UI_IMAGE_MAX_W × _H`, 320 × 448) a una ranura (`RSXKIT_UI_IMAGES`, hoy 1). Espera a que el RSX termine los cuadros que la usan: se llama entre cuadros y rara vez (al cambiar de carátula). |
+| `int rsxkit_ui_image_set(slot, rgba, w, h)` | Sube una imagen RGBA8888 (bytes R, G, B, A; hasta `RSXKIT_UI_IMAGE_MAX_W × _H`, 320 × 448) a una ranura (`RSXKIT_UI_IMAGES`, hoy 2). Espera a que el RSX termine los cuadros que la usan: se llama entre cuadros y rara vez (al cambiar de carátula). |
 | `rsxkit_ui_image(slot, x, y, w, h, rgba)` | Dibuja la imagen de la ranura estirada al rectángulo; `rgba` la tiñe y le da alfa (`0xFFFFFFFF` tal cual). Sin imagen subida, no dibuja nada. |
+| `rsxkit_ui_image_part(slot, x, y, w, h, sx, sy, sw, sh, rgba)` | Igual, pero solo el rectángulo (`sx`, `sy`, `sw`, `sh`) de la imagen, en píxeles: varias figuras en una misma ranura. |
 | `void rsxkit_bind_frame(lw, lh)` (`rsxkit.h`) | El 3D de `rsxkit_draw_triangles` sobre la pantalla del cuadro en vez de un destino. |
 
 - Colores `0xRRGGBBAA`. Todo con mezcla alfa, sin profundidad.

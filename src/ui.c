@@ -15,7 +15,7 @@
 #include "internal.h"
 #include "rsxkit/ui.h"
 
-#define UI_BYTES     (4u << 20)
+#define UI_BYTES     (5u << 20)
 #define ATLAS_PITCH  (RSXKIT_UI_ATLAS_W * 4)
 #define ATLAS_BYTES  ((ATLAS_PITCH * RSXKIT_UI_ATLAS_H + 0xFFFFu) & ~0xFFFFu)
 #define VB_CAP       (RSXKIT_UI_MAX_QUADS * 6)
