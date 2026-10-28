@@ -72,6 +72,29 @@ typedef struct rsxkit_screen {
 
 const rsxkit_screen *rsxkit_screen_info(void);
 
+/* Lo que hizo rsxkit_init con el video, para el log y para esperar a que
+ * el monitor se recupere. Si la salida ya está en el modo elegido (el del
+ * XMB), videoConfigure lleva exactamente la configuración vigente (formato,
+ * aspecto y pitch de videoGetConfiguration, que en la PS3 es 8192 a 1080p
+ * y no ancho × 4) y los búferes de pantalla usan ese pitch: así el monitor
+ * no renegocia el HDMI por segunda vez. Con otro modo, la configuración de
+ * siempre. */
+typedef struct rsxkit_video_boot {
+	int32_t prev_mode;        /* VIDEO_RESOLUTION_* que tenía la salida antes (-1: no se supo) */
+	int32_t mode;             /* el elegido */
+	int configured;           /* 1 si se llamó a videoConfigure, 0 si se conservó el modo */
+	uint64_t configured_us;   /* sysGetSystemTime() justo después de videoConfigure (0 si no) */
+	/* Lo que había antes de configurar (videoGetState y videoGetConfiguration). */
+	int state_ok, state, color_space, scan_mode, conversion, aspect, refresh;
+	int cfg_ok, cfg_resolution, cfg_format, cfg_aspect;
+	uint32_t cfg_pitch;
+	uint32_t pitch;           /* el de nuestros búferes de color */
+	int used_current;         /* 1 si videoConfigure llevó los valores vigentes (formato, aspecto, pitch) */
+	int tiles_active;
+	char tiles[160];          /* las regiones de mosaico con algo (índice:tile/límite/pitch) */
+} rsxkit_video_boot;
+const rsxkit_video_boot *rsxkit_video_boot_info(void);
+
 /* ---- Cuadro -------------------------------------------------------------- */
 
 /* Empieza a dibujar en el búfer trasero y lo limpia con un color 0xRRGGBB.

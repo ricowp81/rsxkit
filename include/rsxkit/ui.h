@@ -79,6 +79,12 @@ int rsxkit_ui_init(void);
 /* Empieza el lote en la pantalla del cuadro en curso (después de
  * rsxkit_frame_begin), con un espacio lógico de lw × lh. */
 void rsxkit_ui_begin(float lw, float lh);
+/* Igual, sobre un destino de render (rsxkit_target_create) en lugar de la
+ * pantalla: la imagen queda para usarla como textura (después de
+ * rsxkit_ui_end, rsxkit_texture_sync). El destino no se borra: rsxkit_clear
+ * antes de dibujar si hace falta. Sin efecto si el destino no se pudo ligar
+ * (rsxkit_ui_end no dibuja nada). */
+void rsxkit_ui_begin_target(rsxkit_target *t, float lw, float lh);
 /* Envía el lote al RSX. */
 void rsxkit_ui_end(void);
 
