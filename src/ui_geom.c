@@ -63,7 +63,10 @@ static struct {
 	uint32_t dropped;
 	float white_s, white_t;  /* centro del bloque blanco */
 	uint32_t group[RSXKIT_UI_MAX_GROUPS], ngroups;
-	uint8_t group_img[RSXKIT_UI_MAX_GROUPS];  /* 0: atlas; n: ranura n − 1 */
+	uint8_t group_img[RSXKIT_UI_MAX_GROUPS];  /* 0: atlas; n: ranura n − 1; HOOK_GROUP: un gancho */
+	uint8_t group_hook[RSXKIT_UI_MAX_GROUPS]; /* con HOOK_GROUP, cuál de hooks[] */
+	struct { rsxkit_ui_hook_fn fn; void *user; } hooks[RSXKIT_UI_MAX_HOOKS];
+	uint32_t nhooks;
 	uint32_t img_w[RSXKIT_UI_IMAGES], img_h[RSXKIT_UI_IMAGES];
 } b;
 
@@ -166,6 +169,7 @@ void rsxkit_ui_batch(rsxkit_vertex *v, uint32_t cap, float lw, float lh)
 	b.group[0] = 0;
 	b.group_img[0] = 0;
 	b.ngroups = 1;
+	b.nhooks = 0;
 	b.lw = lw;
 	b.lh = lh;
 	if (v) {
@@ -209,6 +213,36 @@ void rsxkit_ui_image_size(int slot, uint32_t w, uint32_t h)
 uint32_t rsxkit_ui_group_image(uint32_t g)
 {
 	return g < b.ngroups ? b.group_img[g] : 0;
+}
+
+void rsxkit_ui_hook(rsxkit_ui_hook_fn fn, void *user)
+{
+	/* Con un grupo más después, para que lo siguiente no herede el gancho. */
+	if (!fn || !b.v || b.nhooks >= RSXKIT_UI_MAX_HOOKS || b.ngroups + 2 >= RSXKIT_UI_MAX_GROUPS) {
+		b.dropped++;
+		return;
+	}
+	new_group();
+	b.group_img[b.ngroups - 1] = RSXKIT_UI_HOOK_GROUP;
+	b.group_hook[b.ngroups - 1] = (uint8_t)b.nhooks;
+	b.hooks[b.nhooks].fn = fn;
+	b.hooks[b.nhooks].user = user;
+	b.nhooks++;
+	/* Cierra el grupo del gancho: el siguiente dibujo abre otro. */
+	if (b.ngroups < RSXKIT_UI_MAX_GROUPS)
+		b.group[b.ngroups++] = b.n;
+	b.group_img[b.ngroups - 1] = 0;
+}
+
+void rsxkit_ui_group_hook(uint32_t g, rsxkit_ui_hook_fn *fn, void **user)
+{
+	if (g < b.ngroups && b.group_img[g] == RSXKIT_UI_HOOK_GROUP) {
+		*fn = b.hooks[b.group_hook[g]].fn;
+		*user = b.hooks[b.group_hook[g]].user;
+	} else {
+		*fn = NULL;
+		*user = NULL;
+	}
 }
 
 static void vertex(rsxkit_vertex *v, float x, float y, float s, float t, uint32_t rgba)

@@ -55,6 +55,8 @@ extern "C" {
 #define RSXKIT_UI_IMAGE_MAX_W 320  /* tamaño máximo de una imagen subida */
 #define RSXKIT_UI_IMAGE_MAX_H 448
 #define RSXKIT_UI_MAX_GROUPS 1024  /* llamadas al RSX por cuadro; las de más van juntas */
+#define RSXKIT_UI_MAX_HOOKS     4  /* ganchos de rsxkit_ui_hook por cuadro */
+#define RSXKIT_UI_HOOK_GROUP  255  /* rsxkit_ui_group_image de un gancho */
 
 /* Una onda: una cresta hecha de dos senos, con una línea brillante encima y
  * una lámina debajo que se desvanece. */
@@ -126,6 +128,16 @@ void rsxkit_ui_image(int slot, float x, float y, float w, float h, uint32_t rgba
 void rsxkit_ui_image_part(int slot, float x, float y, float w, float h, float sx, float sy, float sw, float sh,
 			  uint32_t rgba);
 
+/* Un dibujo propio (3D con rsxkit_draw_triangles, por ejemplo) en medio del
+ * lote 2D: lo anterior queda debajo y lo posterior encima. rsxkit_ui_end
+ * llama a fn(user) en ese punto, con la pantalla del cuadro ligada y el
+ * espacio lógico de rsxkit_ui_begin; fn puede cambiar los vértices con
+ * rsxkit_vertices (rsxkit_ui_end vuelve a poner los suyos) y no debe llamar
+ * a otra función de rsxkit_ui. Hasta RSXKIT_UI_MAX_HOOKS por cuadro (de más,
+ * se descartan y se cuentan en rsxkit_ui_dropped). */
+typedef void (*rsxkit_ui_hook_fn)(void *user);
+void rsxkit_ui_hook(rsxkit_ui_hook_fn fn, void *user);
+
 /* Quads descartados desde el arranque (no cupieron en un cuadro). */
 uint32_t rsxkit_ui_dropped(void);
 
@@ -154,6 +166,9 @@ void rsxkit_ui_image_size(int slot, uint32_t w, uint32_t h);
 /* De qué ranura es el grupo `g` de rsxkit_ui_groups: 0 es el atlas de la
  * fuente (rectángulos, texto, ondas) y n > 0 la ranura n − 1. */
 uint32_t rsxkit_ui_group_image(uint32_t g);
+/* El gancho del grupo `g` (si su rsxkit_ui_group_image es RSXKIT_UI_HOOK_GROUP;
+ * si no, NULL). */
+void rsxkit_ui_group_hook(uint32_t g, rsxkit_ui_hook_fn *fn, void **user);
 /* Lo que dibujen rsxkit_ui_gradient, _text y _wave va a `v` (hasta `cap`
  * vértices, triángulos sueltos) en un espacio lógico de lw × lh, en vez de
  * al lote del RSX. Con v NULL no se acepta nada. */

@@ -152,6 +152,16 @@ void rsxkit_ui_end(void)
 		for (uint32_t g = 0; g < groups; g++) {
 			uint32_t end = g + 1 < groups ? first[g + 1] : n;
 			uint32_t img = rsxkit_ui_group_image(g);
+			if (img == RSXKIT_UI_HOOK_GROUP) {
+				rsxkit_ui_hook_fn fn;
+				void *user;
+				rsxkit_ui_group_hook(g, &fn, &user);
+				if (fn) {
+					fn(user);
+					rsxkit_vertices(ui.vb_off[ui.half], RSXKIT_MEM_MAIN);
+				}
+				continue;
+			}
 			rsxkit_draw *d = img && ui.img_ok[img - 1] ? &ui.img[img - 1] : &ui.draw;
 			if (end > first[g] && (!img || ui.img_ok[img - 1]))
 				rsxkit_draw_triangles(d, first[g], end - first[g]);
