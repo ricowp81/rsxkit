@@ -15,7 +15,7 @@
 #include "internal.h"
 #include "rsxkit/ui.h"
 
-#define UI_BYTES     (5u << 20)
+#define UI_BYTES     (6u << 20)
 #define ATLAS_PITCH  (RSXKIT_UI_ATLAS_W * 4)
 #define ATLAS_BYTES  ((ATLAS_PITCH * RSXKIT_UI_ATLAS_H + 0xFFFFu) & ~0xFFFFu)
 #define VB_CAP       (RSXKIT_UI_MAX_QUADS * 6)
@@ -113,6 +113,23 @@ int rsxkit_ui_image_set(int slot, const uint8_t *rgba, uint32_t w, uint32_t h)
 	t->xf[1] = 1.0f / (float)h;
 	ui.img_ok[slot] = 1;
 	rsxkit_ui_image_size(slot, w, h);
+	return RSXKIT_OK;
+}
+
+int rsxkit_ui_image_update(int slot, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t *rgba)
+{
+	if (!ui.ready || slot < 0 || slot >= RSXKIT_UI_IMAGES || !ui.img_ok[slot] || !rgba || !w || !h)
+		return RSXKIT_EARG;
+	const rsxkit_texture *t = &ui.img[slot].tex[0];
+	if (x > t->width || w > t->width - x || y > t->height || h > t->height - y)
+		return RSXKIT_EARG;
+	for (int i = 0; i < 2; i++)
+		if (ui.fence[i])
+			rsxkit_fence_wait(ui.fence[i]);
+	uint8_t *dst = ui.mem + IMG_BASE + (size_t)slot * IMG_BYTES + (size_t)y * IMG_PITCH + (size_t)x * 4;
+	for (uint32_t r = 0; r < h; r++)
+		memcpy(dst + (size_t)r * IMG_PITCH, rgba + (size_t)r * w * 4, (size_t)w * 4);
+	__sync_synchronize();
 	return RSXKIT_OK;
 }
 

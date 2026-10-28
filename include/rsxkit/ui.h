@@ -30,7 +30,7 @@
  * rsxkit_ui_text_width (con la 8x13 da exactamente celdas × 8 × escala). Lo
  * que la fuente externa no tenga sale con la 8x13.
  *
- * Memoria: rsxkit_ui_init reserva 4 MB de memoria principal mapeada al RSX
+ * Memoria: rsxkit_ui_init reserva 6 MB de memoria principal mapeada al RSX
  * (el atlas de 1,9 MB con la caché de glifos, dos búferes de vértices que se
  * turnan con una barrera y la imagen). Los quads que no caben en un cuadro
  * (más de RSXKIT_UI_MAX_QUADS) se descartan y se cuentan.
@@ -51,7 +51,7 @@ extern "C" {
 #endif
 
 #define RSXKIT_UI_MAX_QUADS  4096
-#define RSXKIT_UI_IMAGES      2    /* ranuras de imagen (carátulas, íconos) */
+#define RSXKIT_UI_IMAGES      3    /* ranuras de imagen (carátulas, íconos, miniaturas) */
 #define RSXKIT_UI_IMAGE_MAX_W 320  /* tamaño máximo de una imagen subida */
 #define RSXKIT_UI_IMAGE_MAX_H 448
 #define RSXKIT_UI_MAX_GROUPS 1024  /* llamadas al RSX por cuadro; las de más van juntas */
@@ -122,6 +122,12 @@ void rsxkit_ui_wave(const rsxkit_wave *w, float t);
  * rectángulo (x, y, w, h); `rgba` la tiñe y le pone alfa (0xFFFFFFFF = tal
  * cual, 0xFFFFFF80 = a media opacidad). Devuelve 0 o un código de rsxkit. */
 int rsxkit_ui_image_set(int slot, const uint8_t *rgba, uint32_t w, uint32_t h);
+/* Reescribe el rectángulo (x, y, w, h) de una imagen ya subida con
+ * rsxkit_ui_image_set (por ejemplo, una casilla de un atlas de miniaturas):
+ * `rgba` son w × h píxeles RGBA8888 seguidos. Espera a que el RSX termine los
+ * cuadros en vuelo, como image_set, así que no conviene más de una por cuadro.
+ * Devuelve 0 o RSXKIT_EARG (ranura sin imagen o rectángulo fuera de ella). */
+int rsxkit_ui_image_update(int slot, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t *rgba);
 void rsxkit_ui_image(int slot, float x, float y, float w, float h, uint32_t rgba);
 /* Como rsxkit_ui_image, pero solo el rectángulo (sx, sy, sw, sh) de la
  * imagen, en píxeles: varias figuras en una misma ranura (un atlas). */
