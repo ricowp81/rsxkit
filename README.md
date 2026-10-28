@@ -331,6 +331,7 @@ for (;;) {
 |---|---|
 | `int rsxkit_ui_init(void)` | Reserva 4 MB de memoria principal mapeada al RSX: el atlas (la 8x13 y la caché de glifos), dos búferes de vértices que se turnan con una barrera y `RSXKIT_UI_IMAGES` ranuras de imagen. |
 | `void rsxkit_ui_begin(lw, lh)` / `rsxkit_ui_end()` | Empieza el lote sobre la pantalla del cuadro (`rsxkit_bind_frame`) con espacio lógico `lw × lh` / lo envía. |
+| `void rsxkit_ui_begin_target(t, lw, lh)` | Igual que `rsxkit_ui_begin`, sobre un destino de render (`rsxkit_target_create`) en vez de la pantalla; sin borrarlo (`rsxkit_clear` antes). Con `rsxkit_texture_sync` y `rsxkit_target_texture` la imagen se usa como textura (p. ej. para un filtro de posprocesado). |
 | `rsxkit_ui_gradient(x, y, w, h, tl, tr, bl, br)` / `rsxkit_ui_rect(x, y, w, h, rgba)` | Rectángulo con un color por esquina / de un color. |
 | `float rsxkit_ui_text(x, y, utf8, scale, rgba, max_cells)` | Texto: a escala 1 el renglón mide 13 unidades de alto; con la 8x13 cada carácter, 8 de ancho. Con `max_cells`, «…» al final si no cabe en `max_cells × 8 × scale`. Devuelve el ancho. |
 | `float rsxkit_ui_text_fit(x, y, utf8, scale, rgba, max_w)` | Igual, con el límite como ancho lógico. |

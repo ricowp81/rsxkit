@@ -116,7 +116,7 @@ int rsxkit_ui_image_set(int slot, const uint8_t *rgba, uint32_t w, uint32_t h)
 	return RSXKIT_OK;
 }
 
-void rsxkit_ui_begin(float lw, float lh)
+static void ui_begin(rsxkit_target *t, float lw, float lh)
 {
 	if (!ui.ready)
 		return;
@@ -124,7 +124,12 @@ void rsxkit_ui_begin(float lw, float lh)
 	/* El RSX ya no lee este búfer (lo usó hace dos cuadros). */
 	if (ui.fence[ui.half])
 		rsxkit_fence_wait(ui.fence[ui.half]);
-	rsxkit_bind_frame(lw, lh);
+	if (t) {
+		if (rsxkit_bind(t, NULL, lw, lh) != RSXKIT_OK)
+			return;
+	} else {
+		rsxkit_bind_frame(lw, lh);
+	}
 	ui.draw.scissor[0] = ui.draw.scissor[1] = 0.0f;
 	ui.draw.scissor[2] = lw;
 	ui.draw.scissor[3] = lh;
@@ -133,6 +138,16 @@ void rsxkit_ui_begin(float lw, float lh)
 		memcpy(ui.img[i].scissor, ui.draw.scissor, sizeof ui.draw.scissor);
 	rsxkit_ui_batch(ui.vb[ui.half], VB_CAP, lw, lh);
 	ui.active = 1;
+}
+
+void rsxkit_ui_begin(float lw, float lh)
+{
+	ui_begin(NULL, lw, lh);
+}
+
+void rsxkit_ui_begin_target(rsxkit_target *t, float lw, float lh)
+{
+	ui_begin(t, lw, lh);
 }
 
 void rsxkit_ui_end(void)
