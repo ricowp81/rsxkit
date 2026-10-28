@@ -51,7 +51,7 @@ extern "C" {
 #endif
 
 #define RSXKIT_UI_MAX_QUADS  4096
-#define RSXKIT_UI_IMAGES      3    /* ranuras de imagen (carátulas, íconos, miniaturas) */
+#define RSXKIT_UI_IMAGES      4    /* ranuras de imagen (carátulas, íconos del cartucho, miniaturas, botones) */
 #define RSXKIT_UI_IMAGE_MAX_W 320  /* tamaño máximo de una imagen subida */
 #define RSXKIT_UI_IMAGE_MAX_H 448
 #define RSXKIT_UI_MAX_GROUPS 1024  /* llamadas al RSX por cuadro; las de más van juntas */
