@@ -207,6 +207,13 @@ rsxkit_draw_triangles(&d, first, count);
   (la profundidad del primitivo del RDP de la N64). Con `z = c` en los
   vértices (`pos[2] = c·pos[3]`) cada vértice redondearía distinto y los
   dibujos coplanares se pisarían al azar.
+- **Sombreado lineal en pantalla** (`rsxkit_affine_shade(1)`): los `X_j`
+  (color del vértice, su alfa y la niebla) se interpolan sin corrección de
+  perspectiva, como el Gouraud del RDP de la N64 y de otras consolas de la
+  época; las coordenadas de textura siguen con perspectiva. El vertex
+  program multiplica cada `X_j` por w y los fragment programs los leen con
+  el bit del RSX que entrega la entrada dividida entre w: no cuesta
+  instrucciones por píxel (`docs/rsx-notes.md` del emulador).
 - `rsxkit_vertices` invalida las cachés de vértices y texturas del RSX:
   llamarlo cada vez que cambió lo que hay en memoria.
 - **Segundo color por vértice**: la palabra `pad` del vértice puede llevar

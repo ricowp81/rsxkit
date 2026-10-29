@@ -17,6 +17,13 @@
  * posiciones (rsxkit_lincomb_lerp.vcg): cada vértice va en prev + (pos −
  * prev)·t, para dibujar un cuadro intermedio entre dos con la misma lista.
  *
+ * Sombreado lineal en pantalla (rsxkit_affine_shade): el vertex program
+ * multiplica los siete X_j por w (constante «affine») y los fragment
+ * programs los leen con el bit de SRC2 que quita la corrección de
+ * perspectiva (fprog.c, fpgen.c): el RSX interpola X_j·w/w = X_j lineal en
+ * pantalla, como el RDP de la N64. Hay una copia de cada programa
+ * precompilado con ese bit y los generados lo llevan en su descripción.
+ *
  * Profundidad: z/w en [0, 1] con LEQUAL (LESS con RSXKIT_DEPTH_LESS); sin recorte por los planos
  * cercano y lejano (la z se satura), como hacen los microcódigos de N64
  * sin recorte cercano. El recorte por w > 0 lo sigue haciendo el RSX. Con
@@ -39,11 +46,12 @@ extern const u8 rsxkit_lincomb1_fpo[];
 extern const u8 rsxkit_lincomb2_fpo[];
 
 /* Constantes del vertex program, en su orden: space, xf[2], k[21], fog,
- * fogsel[2]. */
-#define NCONST   27
+ * fogsel[2], affine. */
+#define NCONST   28
 #define C_K      3
 #define C_FOG    24
 #define C_FOGSEL 25
+#define C_AFFINE 27
 
 struct tex_state {
 	int valid;
@@ -77,6 +85,8 @@ static struct {
 	struct vprog prog[2];   /* 0: el de siempre; 1: con posiciones interpoladas */
 	rsxFragmentProgram *fp[3];
 	u32 fp_offset[3];
+	rsxFragmentProgram *fp_aff[3];  /* los mismos, con los X_j sin corrección de perspectiva */
+	u32 fp_aff_offset[3];
 	const void *cur_fp;     /* programa cargado (g->fp_3d >= 0): precompilado o de la caché */
 	uint32_t cur_fp_gen;    /* generación de la caché cuando se cargó */
 	float c[NCONST][4];
@@ -98,11 +108,19 @@ static struct {
 	float t;
 } d3;
 
+/* rsxkit_affine_shade; fuera de d3, que se borra al cerrar el 3D. */
+static int affine_on;
+
 static const char *const const_names[NCONST] = {
 	"space", "xf[0]", "xf[1]", "k[0]", "k[1]", "k[2]", "k[3]", "k[4]", "k[5]", "k[6]", "k[7]",
 	"k[8]", "k[9]", "k[10]", "k[11]", "k[12]", "k[13]", "k[14]", "k[15]", "k[16]", "k[17]", "k[18]",
-	"k[19]", "k[20]", "fog", "fogsel[0]", "fogsel[1]",
+	"k[19]", "k[20]", "fog", "fogsel[0]", "fogsel[1]", "affine",
 };
+
+void rsxkit_affine_shade(int on)
+{
+	affine_on = on != 0;
+}
 
 static int vprog_init(struct vprog *p, const u8 *vpo, int lerp)
 {
@@ -132,7 +150,9 @@ static int init_3d(void)
 	const u8 *fps[3] = { rsxkit_lincomb0_fpo, rsxkit_lincomb1_fpo, rsxkit_lincomb2_fpo };
 	for (int i = 0; i < 3; i++) {
 		d3.fp[i] = (rsxFragmentProgram *)fps[i];
-		if (!rsxkit_fp_upload(d3.fp[i], &d3.fp_offset[i]))
+		d3.fp_aff[i] = (rsxFragmentProgram *)fps[i];
+		if (!rsxkit_fp_upload(d3.fp[i], &d3.fp_offset[i]) ||
+		    !rsxkit_fp_upload_affine(d3.fp_aff[i], &d3.fp_aff_offset[i]))
 			return RSXKIT_ENOMEM;
 	}
 	d3.ready = 1;
@@ -510,6 +530,7 @@ static void set_constants(const rsxkit_draw *d, const struct vprog *p)
 		if (fog_term >= 0)
 			c[C_FOGSEL + fog_term / 4][fog_term % 4] = 1.0f;
 	}
+	c[C_AFFINE][0] = affine_on ? 1.0f : 0.0f;
 	unsigned first = 0, end = NCONST;
 	if (d3.c_valid) {
 		while (first < end && !memcmp(c[first], d3.c[first], sizeof c[0])) first++;
@@ -558,14 +579,17 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	/* Programa: precompilado por número de texturas, o generado para los
 	 * términos del dibujo (y cacheado). */
 	int ntex = d->ntex > 2 ? 2 : d->ntex;
-	const void *want = d3.fp[ntex];
+	/* Los precompilados: la copia afín es otro programa (su propio puntero
+	 * distingue las dos en cur_fp). */
+	const void *want = affine_on ? (const void *)&d3.fp_aff[ntex] : (const void *)d3.fp[ntex];
 	const rsxFragmentProgram *hdr = d3.fp[ntex];
-	u32 offset = d3.fp_offset[ntex];
+	u32 offset = affine_on ? d3.fp_aff_offset[ntex] : d3.fp_offset[ntex];
 	if (d->nterms) {
 		rsxkit_fp_desc desc;
 		memset(&desc, 0, sizeof desc);
 		desc.ntex = (uint8_t)ntex;
 		desc.nterms = d->nterms > RSXKIT_K_TERMS ? RSXKIT_K_TERMS : d->nterms;
+		desc.affine = (uint8_t)affine_on;
 		memcpy(desc.factors, d->factors, sizeof desc.factors);
 		const struct rsxkit_fp_cached *fc = rsxkit_fp_lookup(&desc);
 		if (!fc)
