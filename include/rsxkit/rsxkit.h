@@ -21,6 +21,7 @@
 #define RSXKIT_RSXKIT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "rsxkit/fpgen.h"
@@ -181,6 +182,73 @@ bool rsxkit_lost(void);
 void rsxkit_debug_stall(void);
 /* Nombre de una etiqueta de rsxkit ("barrera", "rsxkit_finish"…). */
 const char *rsxkit_label_name(uint32_t index);
+
+/* ---- Diagnóstico de un RSX colgado y blindaje ----------------------------- */
+
+/* Todo lo de esta sección se puede llamar desde el gancho de las esperas y,
+ * salvo rsxkit_abandon, desde otro hilo: solo lee memoria del PPE y los
+ * registros de control del RSX. */
+
+/* Excepciones del RSX que avisó el sistema (gcmSetGraphicsHandler, que
+ * rsxkit_init registra): cuántas, el valor que pasó el sistema con la
+ * primera y con la última, cuándo (sysGetSystemTime) y GET y PUT al llegar
+ * la última. count 0: ninguna. */
+typedef struct rsxkit_rsx_error {
+	uint32_t count;
+	uint32_t first, last;
+	uint64_t first_us, last_us;
+	uint32_t get, put;
+} rsxkit_rsx_error;
+void rsxkit_rsx_errors(rsxkit_rsx_error *out);
+
+/* El búfer de comandos en offsets de E/S del RSX: dónde empieza la memoria
+ * mapeada que lo contiene (base) y cuánto mide (size), el segmento en curso
+ * (begin, end), dónde escribe rsxkit (current), y GET, PUT y REF del RSX.
+ * Y hasta dónde llegó el RSX: la última barrera (rsxkit_fence) y el último
+ * rsxkit_finish mandados y los que escribió. */
+typedef struct rsxkit_fifo_info {
+	uint32_t base, size;
+	uint32_t begin, end, current;
+	uint32_t get, put, ref;
+	uint32_t fence_sent, fence_done;
+	uint32_t finish_sent, finish_done;
+} rsxkit_fifo_info;
+void rsxkit_fifo_info_get(rsxkit_fifo_info *out);
+
+/* Rastro de las últimas operaciones de rsxkit, anotado en el PPE (no manda
+ * nada al RSX): qué fue, en qué offset del búfer de comandos empezó y sus
+ * números (`fmt` es un formato de printf para a, b, c y d). Los dibujos
+ * seguidos van en una sola entrada (n veces). Junto a GET, PUT y las
+ * etiquetas dice qué tenía el RSX delante al colgarse. */
+typedef struct rsxkit_trace_entry {
+	const char *op, *fmt;
+	uint32_t fifo;
+	uint32_t n;
+	uint32_t a, b, c, d;
+	uint64_t seq;  /* número de la operación desde rsxkit_init */
+} rsxkit_trace_entry;
+#define RSXKIT_TRACE_LEN 64
+/* Copia a `out` las últimas (hasta `max`), de la más vieja a la más nueva. */
+unsigned rsxkit_trace_get(rsxkit_trace_entry *out, unsigned max);
+/* «op números» de una entrada, para el log. */
+int rsxkit_trace_format(const rsxkit_trace_entry *e, char *buf, size_t n);
+
+/* Para salir con el RSX colgado: rsxkit deja de esperarlo (rsxkit_lost) y
+ * de mandarle órdenes, y si GET no apunta a lo que falta mandar (está
+ * dentro de la memoria del búfer y no más allá de PUT), pone PUT = GET para
+ * que el RSX no tenga nada pendiente. *get y *put_before: los de antes.
+ * Devuelve true si movió PUT. */
+bool rsxkit_abandon(uint32_t *get, uint32_t *put_before);
+
+/* Blindaje: lo que rsxkit ajusta para no mandarle al RSX algo que en la PS3
+ * real lo dejó sin avanzar. Todo encendido por omisión.
+ *   RSXKIT_SAFE_SIFM_EVEN: rsxkit_depth_load (motor de imagen escalada) con
+ *   ancho de entrada par (lee un texel más por fila, que no llega a la
+ *   salida). */
+#define RSXKIT_SAFE_SIFM_EVEN 0x1u
+#define RSXKIT_SAFE_ALL       0x1u
+void rsxkit_set_safe(uint32_t flags);
+uint32_t rsxkit_safe(void);
 
 /* Búfer de color en que se está dibujando (X8R8G8B8), para pruebas: leerlo
  * desde el PPE es lento. Llamar a rsxkit_finish antes. */

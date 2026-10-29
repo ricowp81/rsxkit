@@ -477,6 +477,7 @@ void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count)
 	rsxkit_logical_rect(d->scissor, sc);
 	if (sc[2] <= sc[0] || sc[3] <= sc[1])
 		return;
+	rsxkit_trace_repeat("dibujar", "%u vértices; el último desde el %u, tijeras %u,%u", count, first, sc[0], sc[1]);
 	/* Lo más que escribe un dibujo: programa de vértices (~140), constantes
 	 * (~140), programa de fragmentos (~22), texturas, estado y el dibujo. */
 	rsxkit_reserve(RSXKIT_RESERVE_DRAW);

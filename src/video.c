@@ -323,6 +323,7 @@ int rsxkit_init(const rsxkit_config *cfg)
 	g->host_size = host;
 	if (!g->host || rsxInit(&g->ctx, cmd, host, g->host) != 0 || !g->ctx)
 		return RSXKIT_EINIT;
+	rsxkit_diag_init();  /* aviso de excepciones del RSX y rastro (diag.c) */
 	int rc = init_video(cfg);
 	if (rc != RSXKIT_OK)
 		return rc;
@@ -352,6 +353,7 @@ void rsxkit_shutdown(void)
 	rsxkit_target_shutdown();
 	rsxkit_post_shutdown();
 	free_screen_buffers();
+	rsxkit_diag_shutdown();
 	g->ctx = NULL;
 }
 
@@ -403,7 +405,12 @@ const rsxkit_screen *rsxkit_screen_info(void)
 void rsxkit_finish(void)
 {
 	struct rsxkit_state *g = &rsxkit_g;
+	/* Abandonado el RSX (rsxkit_abandon) no se le manda nada más: un
+	 * vaciado movería PUT de nuevo. */
+	if (rsxkit_lost())
+		return;
 	uint32_t v = ++g->finish_seq;
+	rsxkit_trace_note("finish", "%u", v, 0, 0, 0);
 	rsxkit_reserve(16);
 	rsxSetWriteBackendLabel(g->ctx, RSXKIT_LABEL_FINISH, v);
 	rsxFlushBuffer(g->ctx);
@@ -486,8 +493,11 @@ void rsxkit_frame_end(void)
 	/* Un flip en vuelo como máximo (por si no hubo rsxkit_frame_begin). El
 	 * RSX no espera el flip: lo que se le mande después no toca la
 	 * pantalla hasta el próximo rsxkit_frame_begin, que espera en el PPE. */
+	if (rsxkit_lost())
+		return;  /* ni flip ni vaciado (rsxkit_abandon) */
 	wait_flip(0);
 	gcmResetFlipStatus();
+	rsxkit_trace_note("flip", "búfer %u", g->cur, 0, 0, 0);
 	rsxkit_reserve(64);
 	gcmSetFlip(g->ctx, g->cur);
 	rsxFlushBuffer(g->ctx);

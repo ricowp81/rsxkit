@@ -77,6 +77,16 @@ void rsxkit_wait_label(uint8_t index, uint32_t value);
 void rsxkit_wait_begin(rsxkit_wait_kind kind, const char *what, uint32_t label, uint32_t expected, uint32_t current);
 bool rsxkit_wait_tick(uint32_t current);
 void rsxkit_wait_end(void);
+/* rsxkit_abandon: como si un gancho hubiera abandonado una espera. */
+void rsxkit_wait_set_lost(void);
+/* Diagnóstico (diag.c): el aviso de excepciones del sistema y el rastro de
+ * operaciones. rsxkit_trace_note anota una operación con su offset en el
+ * búfer de comandos (antes de escribir sus órdenes); rsxkit_trace_repeat
+ * junta las seguidas iguales (dibujos) en una entrada. `fmt` es para a..d. */
+void rsxkit_diag_init(void);
+void rsxkit_diag_shutdown(void);
+void rsxkit_trace_note(const char *op, const char *fmt, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+void rsxkit_trace_repeat(const char *op, const char *fmt, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
 /* Viewport y estado fijo del dibujo 2D sobre la superficie en curso. */
 void rsxkit_set_2d_state(void);
 /* Vuelve a la pantalla (búfer trasero) como superficie, con el estado 2D. */
