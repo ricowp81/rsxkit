@@ -444,6 +444,13 @@ static int read_surface_format(rsxkit_format f, uint32_t *gcm, uint32_t *bpp)
 	}
 }
 
+static int read_exact = 1;
+
+void rsxkit_target_read_exact(int exact)
+{
+	read_exact = exact != 0;
+}
+
 int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t dst_offset, uint32_t dst_pitch,
 		       uint32_t img_w, uint32_t img_h, rsxkit_format format)
 {
@@ -512,8 +519,12 @@ int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t 
 	uint32_t toff = t->offset + (uint32_t)s.y * t->pitch;
 	float u0 = (float)s.x / t->w, u1 = (float)((uint32_t)s.x + s.w) / t->w;
 	rsxkit_rect full = { 0, 0, img_w, img_h };
+	/* A 1:1 el más cercano: el lineal mezcla una fracción del vecino
+	 * (rsxkit_read_filter_nearest en rsxkit.h). */
+	rsxkit_filter filter = rsxkit_read_filter_nearest(s.w, s.h, img_w, img_h, read_exact) ? RSXKIT_FILTER_NEAREST
+										      : RSXKIT_FILTER_LINEAR;
 	rsxkit_blit_to(toff, RSXKIT_MEM_LOCAL, t->pitch, t->w, s.h, u0, 0.0f, u1, 1.0f, RSXKIT_XRGB8888, &full, img_w,
-		       img_h, RSXKIT_FILTER_LINEAR);
+		       img_h, filter);
 
 	/* Lo ligado ya no vale: ni la pantalla ni un destino. */
 	rsxkit_bound.target = NULL;

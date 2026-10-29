@@ -503,7 +503,8 @@ void rsxkit_texture_sync(void);
 
 /* Copia a la memoria principal (mapeada con rsxkit_map_main) la región
  * `src` del destino (NULL: todo), reducida a img_w × img_h píxeles con
- * filtro lineal, en `format` (RSXKIT_RGB565 o RSXKIT_XRGB8888) y con
+ * filtro lineal (o copiada tal cual si ya miden lo mismo:
+ * rsxkit_target_read_exact), en `format` (RSXKIT_RGB565 o RSXKIT_XRGB8888) y con
  * `dst_pitch` bytes por fila (múltiplo de 64; offset alineado a 128). Lo
  * hace el RSX con el pipeline 3D sobre una superficie en memoria
  * principal: encola el trabajo y vuelve; rsxkit_fence/rsxkit_fence_wait
@@ -516,6 +517,20 @@ void rsxkit_texture_sync(void);
  * que va ligada con la salida). */
 int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t dst_offset, uint32_t dst_pitch,
 		       uint32_t img_w, uint32_t img_h, rsxkit_format format);
+
+/* Filtro de rsxkit_target_read: lineal cuando reduce (img_w × img_h menor
+ * que la región), y el más cercano cuando la región ya mide img_w × img_h
+ * (copia 1:1). El filtro lineal a 1:1 no es una copia exacta en el RSX: el
+ * vértice se ajusta a su subpíxel y la muestra cae a una fracción de texel
+ * del centro, así que mezcla una parte del vecino; con imágenes que llevan
+ * un índice de paleta en el rojo (una capa de 8 bits) un índice mezclado es
+ * otro color (puntos sueltos en cada borde). `exact` = 0 vuelve al lineal
+ * siempre (para comparar); por omisión, 1. */
+static inline int rsxkit_read_filter_nearest(uint32_t src_w, uint32_t src_h, uint32_t img_w, uint32_t img_h, int exact)
+{
+	return exact && src_w == img_w && src_h == img_h;
+}
+void rsxkit_target_read_exact(int exact);
 
 /* Copia todo el destino `src` en `dst` (del mismo tamaño o mayor; se
  * estira si no), para leer como textura lo que se está dibujando en
