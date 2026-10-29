@@ -487,6 +487,15 @@ void rsxkit_vertices(uint32_t offset, uint8_t location);
 void rsxkit_vertices_prev(uint32_t offset, uint8_t location, float t);
 /* Triángulos sueltos: vértices first .. first + count − 1 del arreglo. */
 void rsxkit_draw_triangles(const rsxkit_draw *d, uint32_t first, uint32_t count);
+/* Sombreado lineal en pantalla: los términos X_j (color del vértice, su
+ * alfa y la niebla) se interpolan sin corrección de perspectiva, como el
+ * sombreado Gouraud del RDP de la N64 y de otras consolas de la época; las
+ * coordenadas de textura siguen con perspectiva. El vertex program
+ * multiplica cada X_j por w y los fragment programs lo leen con el bit del
+ * RSX que entrega la entrada dividida entre w (docs/rsx-notes.md): no cuesta
+ * instrucciones por píxel. Apagado al iniciar; vale para los dibujos
+ * siguientes. */
+void rsxkit_affine_shade(int on);
 
 /* ---- Un destino como textura y de vuelta a la memoria principal --------------
  * Render a textura: lo dibujado en un destino se puede leer en un dibujo 3D

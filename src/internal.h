@@ -95,13 +95,18 @@ void rsxkit_post_shutdown(void);
 /* Copia un fragment program a la memoria del RSX, con interpolación de
  * perspectiva en todas sus entradas (fprog.c). NULL si no hay memoria. */
 void *rsxkit_fp_upload(rsxFragmentProgram *fp, u32 *offset);
+/* Igual, pero las instrucciones que leen TEXCOORD1..7 (los términos X_j)
+ * quedan sin corrección de perspectiva: el sombreado lineal en pantalla de
+ * rsxkit_affine_shade (el vertex program multiplica los X_j por w). */
+void *rsxkit_fp_upload_affine(rsxFragmentProgram *fp, u32 *offset);
 /* Programas subidos con rsxkit_fp_upload o registrados con
  * rsxkit_fp_track cuya copia en la memoria del RSX cambió; con `repair`,
  * los vuelve a copiar. */
 int rsxkit_fp_verify(int repair);
 /* Registra (o, si ya estaba, vuelve a sumar) la copia `buf` de un programa
- * para rsxkit_fp_verify, que la restaura desde `src` (con `fix`, limpiando
- * la corrección de perspectiva como rsxkit_fp_upload). */
+ * para rsxkit_fp_verify, que la restaura desde `src` (`fix` 1: limpiando la
+ * corrección de perspectiva como rsxkit_fp_upload; 2: como
+ * rsxkit_fp_upload_affine). */
 void rsxkit_fp_track(void *buf, const void *src, u32 size, int fix);
 void rsxkit_fp_untrack(void *buf);
 void rsxkit_fp_fix_perspective(void *ucode, u32 size);
