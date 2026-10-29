@@ -330,6 +330,23 @@ static void set_blend(uint8_t blend, uint8_t dsta)
 		rsxSetBlendEnable(ctx, GCM_TRUE);
 		rsxSetBlendFunc(ctx, GCM_SRC_ALPHA, GCM_ONE, alpha ? GCM_ONE : GCM_ZERO, alpha ? GCM_ZERO : GCM_ONE);
 		break;
+	case RSXKIT_BLEND_MUL:
+		rsxSetBlendEnable(ctx, GCM_TRUE);
+		rsxSetBlendFunc(ctx, GCM_ZERO, GCM_SRC_ALPHA, alpha ? GCM_ONE : GCM_ZERO, alpha ? GCM_ZERO : GCM_ONE);
+		break;
+	case RSXKIT_BLEND_ADD_MUL:
+		rsxSetBlendEnable(ctx, GCM_TRUE);
+		rsxSetBlendFunc(ctx, GCM_ONE, GCM_SRC_ALPHA, alpha ? GCM_ONE : GCM_ZERO, alpha ? GCM_ZERO : GCM_ONE);
+		break;
+	case RSXKIT_BLEND_ALPHA_INV:
+		rsxSetBlendEnable(ctx, GCM_TRUE);
+		rsxSetBlendFunc(ctx, GCM_ONE_MINUS_SRC_ALPHA, GCM_SRC_ALPHA, alpha ? GCM_ONE : GCM_ZERO,
+				alpha ? GCM_ZERO : GCM_ONE);
+		break;
+	case RSXKIT_BLEND_ADD_ONE:
+		rsxSetBlendEnable(ctx, GCM_TRUE);
+		rsxSetBlendFunc(ctx, GCM_ONE, GCM_ONE, alpha ? GCM_ONE : GCM_ZERO, alpha ? GCM_ZERO : GCM_ONE);
+		break;
 	case RSXKIT_BLEND_NONE:
 		rsxSetBlendEnable(ctx, GCM_FALSE);
 		mask = 0;

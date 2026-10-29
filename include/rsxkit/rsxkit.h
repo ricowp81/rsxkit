@@ -419,6 +419,10 @@ typedef enum rsxkit_blend {
 	RSXKIT_BLEND_ALPHA_MAX, /* RGB: src*a+dst*(1-a); alfa: máximo */
 	RSXKIT_BLEND_REPLACE_MIN_ALPHA, /* RGB: reemplaza; alfa: mínimo */
 	RSXKIT_BLEND_KEEP_MIN_ALPHA,    /* RGB: conserva destino; alfa: mínimo */
+	RSXKIT_BLEND_MUL,        /* dst·a (oscurece lo dibujado según el alfa) */
+	RSXKIT_BLEND_ADD_MUL,    /* src + dst·a */
+	RSXKIT_BLEND_ALPHA_INV,  /* src·(1 − a) + dst·a */
+	RSXKIT_BLEND_ADD_ONE,    /* src + dst (suma sin peso) */
 } rsxkit_blend;
 
 typedef enum rsxkit_cull {
