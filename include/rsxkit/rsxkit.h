@@ -546,7 +546,9 @@ void rsxkit_texture_sync(void);
 /* Copia a la memoria principal (mapeada con rsxkit_map_main) la región
  * `src` del destino (NULL: todo), reducida a img_w × img_h píxeles con
  * filtro lineal (o copiada tal cual si ya miden lo mismo:
- * rsxkit_target_read_exact), en `format` (RSXKIT_RGB565 o RSXKIT_XRGB8888) y con
+ * rsxkit_target_read_exact), en `format` (RSXKIT_RGB565, RSXKIT_XRGB8888 o
+ * RSXKIT_ARGB8888: este último con el alfa de un destino creado con
+ * RSXKIT_TARGET_ALPHA, filtrado como el color, y 1 si no tiene) y con
  * `dst_pitch` bytes por fila (múltiplo de 64; offset alineado a 128). Lo
  * hace el RSX con el pipeline 3D sobre una superficie en memoria
  * principal: encola el trabajo y vuelve; rsxkit_fence/rsxkit_fence_wait
