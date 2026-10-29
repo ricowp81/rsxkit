@@ -449,6 +449,10 @@ static int read_surface_format(rsxkit_format f, uint32_t *gcm, uint32_t *bpp)
 		*gcm = GCM_SURFACE_X8R8G8B8;
 		*bpp = 4;
 		return 1;
+	case RSXKIT_ARGB8888:  /* con el alfa del destino (1 si no tiene) */
+		*gcm = GCM_SURFACE_A8R8G8B8;
+		*bpp = 4;
+		return 1;
 	default:
 		return 0;
 	}
@@ -533,8 +537,12 @@ int rsxkit_target_read(const rsxkit_target *t, const rsxkit_rect *src, uint32_t 
 	 * (rsxkit_read_filter_nearest en rsxkit.h). */
 	rsxkit_filter filter = rsxkit_read_filter_nearest(s.w, s.h, img_w, img_h, read_exact) ? RSXKIT_FILTER_NEAREST
 										      : RSXKIT_FILTER_LINEAR;
+	/* En ARGB8888 el alfa del destino llega a la salida (filtrado como el
+	 * color); sin alfa en el destino, o en los otros formatos, sale 1. */
+	rsxkit_blit_alpha(format == RSXKIT_ARGB8888 && t->alpha);
 	rsxkit_blit_to(toff, RSXKIT_MEM_LOCAL, t->pitch, t->w, s.h, u0, 0.0f, u1, 1.0f, RSXKIT_XRGB8888, &full, img_w,
 		       img_h, filter);
+	rsxkit_blit_alpha(0);
 
 	/* Lo ligado ya no vale: ni la pantalla ni un destino. */
 	rsxkit_bound.target = NULL;
