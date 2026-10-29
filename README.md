@@ -147,7 +147,7 @@ el tamaño del destino.
 | `rsxkit_depth *rsxkit_depth_create(w, h)` / `rsxkit_depth_destroy(d)` | Profundidad; nace en 1. Debe ser al menos tan grande como el destino. |
 | `int rsxkit_bind(t, d, lw, lh)` | Dibujar en `t` (y `d`, o `NULL`) con espacio lógico `lw × lh`, hasta otro `rsxkit_bind` o `rsxkit_frame_begin`. Sin `d` (o con una más chica que `t`) liga la profundidad de la pantalla, con prueba y escritura apagadas; si tampoco cubre a `t`, no liga nada y devuelve `RSXKIT_EDEPTH` (una zeta más chica que el color puede fallar o recortar en el RSX). |
 | `int rsxkit_depth_reserve(w, h)` | Agranda la profundidad de la pantalla a al menos `w × h`, para ligar sin profundidad propia destinos más grandes que la pantalla (1600×1200 en 720p). Reserva al llamarla (fuera del bucle de dibujo), olvida lo ligado y se conserva en `rsxkit_video_reconfigure`; `0 × 0` vuelve al tamaño de la pantalla. `rsxkit_target_copy`, `rsxkit_target_fill` y `rsxkit_target_read` también devuelven `RSXKIT_EDEPTH` si su superficie no cabe en ella. |
-| `rsxkit_target *rsxkit_target_create_ex(w, h, flags)` / `int rsxkit_target_has_alpha(t)` | Con `RSXKIT_TARGET_ALPHA`, un destino A8R8G8B8 con canal alfa, para render a textura con transparencia (una imagen RGBA5551 de una consola de 16 bits). Nace con alfa 0. Lo escriben: `rsxkit_clear` (el byte alto de `rgb` es el alfa), los dibujos (cada píxel escrito queda con alfa 1; con `rsxkit_draw.dst_alpha = RSXKIT_DSTA_FRAG` y `blend = RSXKIT_BLEND_OFF`, con el alfa del fragmento: rellenos de un color de alfa 0/1 y copias de textura), `rsxkit_target_fill` (el bit de alfa de `RSXKIT_RGBA5551`) y `rsxkit_target_copy` (copia el alfa si el origen también lo tiene). `rsxkit_target_texture` lo devuelve como `RSXKIT_XRGB8888`, cuyo alfa el 3D lee; el framebuffer 2D y `rsxkit_target_present` lo ignoran. Cada dibujo en un destino con alfa mezcla (ONE / ZERO en los opacos): úsese en los que se leen como textura, no en el cuadro principal. |
+| `rsxkit_target *rsxkit_target_create_ex(w, h, flags)` / `int rsxkit_target_has_alpha(t)` | Con `RSXKIT_TARGET_ALPHA`, un destino A8R8G8B8 con canal alfa, para render a textura con transparencia (una imagen RGBA5551 de una consola de 16 bits). Nace con alfa 0. Lo escriben: `rsxkit_clear` (el byte alto de `rgb` es el alfa), los dibujos (cada píxel escrito queda con alfa 1; con `rsxkit_draw.dst_alpha = RSXKIT_DSTA_FRAG` y `blend = RSXKIT_BLEND_OFF`, con el alfa del fragmento: rellenos de un color de alfa 0/1 y copias de textura), `rsxkit_target_fill` (el bit de alfa de `RSXKIT_RGBA5551`) y `rsxkit_target_copy` (copia el alfa si el origen también lo tiene). `rsxkit_target_texture` lo devuelve como `RSXKIT_ARGB8888` (los destinos sin alfa, como `RSXKIT_XRGB8888`): el 3D y el posprocesado leen su alfa; `rsxkit_target_present` lo ignora. Las mezclas `RSXKIT_BLEND_ALPHA_MAX`, `_REPLACE_MIN_ALPHA` y `_KEEP_MIN_ALPHA` dejan en el alfa el máximo o el mínimo con el del destino, sin mirar `dst_alpha`. `RSXKIT_CLEAR_ALPHA` en `rsxkit_clear` toma el byte alto como alfa aunque el destino no tenga canal alfa. `rsxkit_target_create_rgba(w, h)` es `rsxkit_target_create_ex` con `RSXKIT_TARGET_ALPHA`. Cada dibujo en un destino con alfa mezcla (ONE / ZERO en los opacos): úsese en los que se leen como textura, no en el cuadro principal. |
 | `void rsxkit_clear(flags, rgb, depth, rect)` | Borra color y/o profundidad en un rectángulo lógico (`NULL`: todo). `rgb` es `0x00RRGGBB`; en un destino con alfa el byte alto es el alfa. |
 | `void rsxkit_target_present(t, src, img_w, img_h, view, out)` | En el cuadro en curso, presenta la región `src` del destino (cualquier rectángulo: sirve para recortar el overscan) acomodada como una imagen de `img_w × img_h` (como `rsxkit_fb_draw`). |
 
@@ -209,7 +209,18 @@ rsxkit_draw_triangles(&d, first, count);
   dibujos coplanares se pisarían al azar.
 - `rsxkit_vertices` invalida las cachés de vértices y texturas del RSX:
   llamarlo cada vez que cambió lo que hay en memoria.
-- rsxkit recuerda el estado y solo reenvía lo que cambió.
+- **Segundo color por vértice**: la palabra `pad` del vértice puede llevar
+  otro RGBA de 8 bits; con `rsxkit_vertices_color_aux(1)` los dibujos
+  siguientes lo leen como COLOR0 en lugar de `rgba` (datos por vértice para
+  un programa propio sin otro arreglo ni constantes por dibujo).
+- **Stencil**: prueba (siempre, distinto, igual) con referencia y máscaras,
+  y operaciones separadas al pasar (`stencil_op`), al fallar la profundidad
+  (`stencil_zfail`) y al fallar el stencil (`stencil_sfail`): conservar,
+  reemplazar o poner a cero. La profundidad admite también `RSXKIT_DEPTH_EQUAL`.
+- rsxkit recuerda el estado y solo reenvía lo que cambió. Un programa propio
+  (`rsxkit_draw.program`) se carga solo al cambiar de programa y su etiqueta
+  de uso se escribe al cambiarlo, al salir del 3D o antes de destruirlo;
+  `rsxkit_3d_program_sync(1)` vuelve a cargarlo y etiquetarlo en cada dibujo.
 
 ### Generador de fragment programs
 

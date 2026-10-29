@@ -24,8 +24,7 @@
 
 struct rsxkit_target {
 	int used;
-	int alpha;
-
+	int alpha;  /* A8R8G8B8 (RSXKIT_TARGET_ALPHA) */
 	uint32_t w, h, pitch, offset;
 	void *mem;
 };
@@ -394,13 +393,24 @@ void rsxkit_clear(uint32_t flags, uint32_t rgb, float depth, const float rect[4]
 	rsxkit_bound.scissor_valid = 0;
 	if (depth < 0.0f) depth = 0.0f;
 	if (depth > 1.0f) depth = 1.0f;
-	/* El alfa (byte alto) solo cuenta en un destino con alfa. */
-	rsxSetClearColor(g->ctx, rsxkit_bound.alpha ? rgb : rgb & 0x00FFFFFFu);
+	/* El alfa (byte alto) cuenta en un destino con alfa o si lo piden. */
+	rsxSetClearColor(g->ctx, rsxkit_bound.alpha || (flags & RSXKIT_CLEAR_ALPHA) ? rgb : rgb & 0x00FFFFFFu);
 	rsxSetClearDepthStencil(g->ctx, (uint32_t)(depth * 16777215.0f) << 8);
 	rsxSetColorMask(g->ctx, GCM_COLOR_MASK_B | GCM_COLOR_MASK_G | GCM_COLOR_MASK_R | GCM_COLOR_MASK_A);
 	rsxSetDepthWriteEnable(g->ctx, GCM_TRUE);
 	rsxClearSurface(g->ctx, mask);
 	g->state_valid = 0;
+}
+
+void rsxkit_clear_stencil(uint8_t value)
+{
+	if (!rsxkit_bound.target || !rsxkit_bound.depth) return;
+	rsxkit_reserve(32);
+	rsxSetScissor(rsxkit_g.ctx, 0, 0, rsxkit_bound.w, rsxkit_bound.h);
+	rsxSetStencilMask(rsxkit_g.ctx, 255);
+	rsxSetClearDepthStencil(rsxkit_g.ctx, value);
+	rsxClearSurface(rsxkit_g.ctx, GCM_CLEAR_S);
+	rsxkit_g.state_valid = 0;
 }
 
 void rsxkit_target_texture(const rsxkit_target *t, uint32_t y0, uint32_t rows, rsxkit_texture *out)
@@ -415,7 +425,7 @@ void rsxkit_target_texture(const rsxkit_target *t, uint32_t y0, uint32_t rows, r
 	out->width = (uint16_t)t->w;
 	out->height = (uint16_t)rows;
 	out->location = RSXKIT_MEM_LOCAL;
-	out->format = RSXKIT_XRGB8888;  /* con alfa real si t->alpha */
+	out->format = t->alpha ? RSXKIT_ARGB8888 : RSXKIT_XRGB8888;
 }
 
 void rsxkit_texture_sync(void)

@@ -323,6 +323,11 @@ int rsxkit_init(const rsxkit_config *cfg)
 	g->host_size = host;
 	if (!g->host || rsxInit(&g->ctx, cmd, host, g->host) != 0 || !g->ctx)
 		return RSXKIT_EINIT;
+	/* Las etiquetas de GCM no están inicializadas. La comparación modular
+	 * de las esperas exige partir del mismo cero que los contadores. */
+	*(volatile u32 *)gcmGetLabelAddress(RSXKIT_LABEL_FINISH) = 0;
+	*(volatile u32 *)gcmGetLabelAddress(RSXKIT_LABEL_FENCE) = 0;
+	__sync_synchronize();
 	int rc = init_video(cfg);
 	if (rc != RSXKIT_OK)
 		return rc;
@@ -451,6 +456,8 @@ void rsxkit_set_2d_state_size(uint32_t w, uint32_t h)
 
 	rsxSetColorMask(g->ctx, GCM_COLOR_MASK_B | GCM_COLOR_MASK_G | GCM_COLOR_MASK_R | GCM_COLOR_MASK_A);
 	rsxSetColorMaskMrt(g->ctx, 0);
+	rsxSetStencilTestEnable(g->ctx, GCM_FALSE);
+	rsxSetBlendEquation(g->ctx, GCM_FUNC_ADD, GCM_FUNC_ADD);  /* el 3D la deja en MAX o MIN */
 	rsxSetViewport(g->ctx, 0, 0, w, h, 0.0f, 1.0f, scale, offset);
 	rsxSetScissor(g->ctx, 0, 0, w, h);
 	rsxSetZMinMaxControl(g->ctx, GCM_FALSE, GCM_TRUE, GCM_FALSE);
