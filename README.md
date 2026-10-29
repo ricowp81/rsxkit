@@ -193,7 +193,10 @@ rsxkit_draw_triangles(&d, first, count);
   una sola vez (`RSXKIT_WRAP_MIRROR_ONCE`: u en [−1, 0] es el reflejo de
   [0, 1] y fuera de [−1, 1] se fija el borde), filtro y la transformación
   `u = s·xf[0] + xf[2]`, `v = t·xf[1] + xf[3]`.
-- **Estado**: mezcla (opaca, alfa, aditiva, sin color), profundidad (prueba
+- **Estado**: mezcla (`rsxkit_blend`: opaca, alfa `src·a + dst·(1 − a)`,
+  aditiva `src·a + dst`, sin color, y los demás productos con el alfa del
+  fragmento que un blender de consola pide: `dst·a`, `src + dst·a`,
+  `src·(1 − a) + dst·a` y `src + dst`), profundidad (prueba
   LEQUAL, escritura, desplazamiento para calcomanías), recorte de caras
   (frente = antihorario con la y hacia arriba), prueba de alfa, tijeras
   lógicas (recortadas al destino; si quedan vacías el dibujo no se manda:

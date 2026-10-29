@@ -396,10 +396,14 @@ typedef enum rsxkit_remap {
 } rsxkit_remap;
 
 typedef enum rsxkit_blend {
-	RSXKIT_BLEND_OFF,    /* reemplaza */
-	RSXKIT_BLEND_ALPHA,  /* src·a + dst·(1 − a) */
-	RSXKIT_BLEND_ADD,    /* src·a + dst */
-	RSXKIT_BLEND_NONE,   /* no escribe color */
+	RSXKIT_BLEND_OFF,        /* reemplaza */
+	RSXKIT_BLEND_ALPHA,      /* src·a + dst·(1 − a) */
+	RSXKIT_BLEND_ADD,        /* src·a + dst */
+	RSXKIT_BLEND_NONE,       /* no escribe color */
+	RSXKIT_BLEND_MUL,        /* dst·a (oscurece lo dibujado según el alfa) */
+	RSXKIT_BLEND_ADD_MUL,    /* src + dst·a */
+	RSXKIT_BLEND_ALPHA_INV,  /* src·(1 − a) + dst·a */
+	RSXKIT_BLEND_ADD_ONE,    /* src + dst (suma sin peso) */
 } rsxkit_blend;
 
 typedef enum rsxkit_cull {
